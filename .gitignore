@@ -35,3 +35,11 @@ Thumbs.db
 # Secrets - never commit
 *.pem
 *.key
+
+# Local Terraform state pulled by scripts/tf.sh (the bucket is the source
+# of truth; a stale copy here would be applied over CI's)
+infra/terraform.tfstate.backup
+
+# Not committed upstream, and CI never runs npm install -- the build uses
+# only node builtins and the icons are committed.
+package-lock.json
