@@ -78,6 +78,9 @@ class FakeBucket:
             raise _ServiceError(404)
         return types.SimpleNamespace(data=types.SimpleNamespace(content=self.objects[name]))
 
+    def put_object(self, namespace, bucket, name, body, **kw):
+        self.objects[name] = body
+
 
 def serve(name, payload):
     client = FakeBucket({name: payload})
@@ -286,6 +289,94 @@ class TestRouting(unittest.TestCase):
     def test_missing_object_is_404(self):
         res = func.serve(None, FakeBucket({}), "ns", "bucket", "nope.js")
         self.assertEqual(res.status_code, 404)
+
+
+class TestResultCollection(unittest.TestCase):
+    """Phase 3: POST /api/log and GET /api/history."""
+
+    def setUp(self):
+        self.bucket = FakeBucket({})
+
+    def post(self, payload, athlete="brian"):
+        body = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        return func._handle_log(None, io.BytesIO(body), self.bucket,
+                                "ns", "b", athlete)
+
+    def history(self, tail="", athlete="brian"):
+        return func._handle_history(None, self.bucket, "ns", "b", athlete, tail)
+
+    def body(self, res):
+        return json.loads(res.response_data)
+
+    RESULT = {"schema": "wodin/result@1", "workoutId": "2026-09-20",
+              "title": "Routine 2", "duration": "47:12", "durationSec": 2832,
+              "rpe": 9, "log": {"ex5.s1": {"load": 95, "reps": 5}},
+              "skipped": ["ex3"]}
+
+    def test_a_result_is_stored_under_its_athlete(self):
+        res = self.post(self.RESULT)
+        self.assertEqual(res.status_code, 201)
+        self.assertIn("results/brian/2026-09-20.json", self.bucket.objects)
+
+    def test_athletes_cannot_collide(self):
+        self.post(self.RESULT, athlete="brian")
+        self.post(self.RESULT, athlete="sam")
+        self.assertIn("results/brian/2026-09-20.json", self.bucket.objects)
+        self.assertIn("results/sam/2026-09-20.json", self.bucket.objects)
+
+    def test_resubmitting_overwrites_rather_than_duplicating(self):
+        self.post(self.RESULT)
+        corrected = dict(self.RESULT, rpe=7)
+        self.post(corrected)
+        index = self.body(self.history())
+        self.assertEqual(len(index["sessions"]), 1, "a correction must not add a row")
+        self.assertEqual(index["sessions"][0]["rpe"], 7)
+
+    def test_server_records_its_own_receipt_time_and_athlete(self):
+        # A phone at the gym may have any clock at all.
+        self.post(self.RESULT)
+        stored = json.loads(self.bucket.objects["results/brian/2026-09-20.json"])
+        self.assertIn("receivedAt", stored)
+        self.assertEqual(stored["athleteId"], "brian")
+
+    def test_history_is_scoped_to_the_session_athlete(self):
+        self.post(dict(self.RESULT, workoutId="secret-session"), athlete="sam")
+        # brian asking for sam's session id must not get it
+        res = self.history("secret-session", athlete="brian")
+        self.assertEqual(res.status_code, 404)
+
+    def test_history_detail_returns_the_full_result(self):
+        self.post(self.RESULT)
+        got = self.body(self.history("2026-09-20"))
+        self.assertEqual(got["log"], self.RESULT["log"])
+
+    def test_empty_history_is_not_an_error(self):
+        res = self.history()
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(self.body(res)["sessions"], [])
+
+    def test_bad_bodies_are_rejected(self):
+        for bad, why in ((b"not json", "garbage"),
+                         (b'"a string"', "not an object"),
+                         ({"log": {}}, "no workoutId"),
+                         ({"workoutId": "x", "log": []}, "log not an object")):
+            res = self.post(bad)
+            self.assertIn(res.status_code, (400,), why)
+
+    def test_workout_id_cannot_escape_the_prefix(self):
+        # It arrives from the client and becomes part of an object name.
+        for evil in ("../../auth", "a/b", "_index", ".hidden", "x" * 100):
+            self.assertIsNone(func._safe_id(evil), evil)
+        self.assertEqual(func._safe_id("2026-09-20"), "2026-09-20")
+
+    def test_oversized_body_is_refused(self):
+        res = self.post(b"x" * (func._MAX_BODY_BYTES + 1))
+        self.assertEqual(res.status_code, 413)
+
+    def test_api_responses_are_never_cacheable(self):
+        res = self.post(self.RESULT)
+        self.assertIn("no-store", res.headers["Cache-Control"])
+        self.assertIn("no-store", self.history().headers["Cache-Control"])
 
 
 class TestCaching(unittest.TestCase):

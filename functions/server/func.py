@@ -52,6 +52,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from urllib.parse import urlsplit, parse_qs, quote
 
 import oci
@@ -107,6 +108,18 @@ _NEVER_SERVE = frozenset(["auth.json"])
 _NEVER_SERVE_PREFIXES = ("results/",)
 
 _AUTH_OBJECT = "auth.json"
+
+# Results are keyed by the protocol's own workoutId rather than by a date
+# derived here: the athlete may log Monday's session on Wednesday, and two
+# sessions can share a day. Re-submitting the same workout overwrites,
+# which is what a corrected log should do.
+_RESULTS_PREFIX = "results/"
+_INDEX_OBJECT = "_index.json"
+
+# A summary index per athlete, maintained on write. History is then one
+# object read instead of fetching every session to build a list -- which
+# matters by the second year, not the second week.
+_MAX_BODY_BYTES = 256 * 1024
 _COOKIE_NAME = "wodin_session"
 _PBKDF2_ITERATIONS = 200000
 
@@ -304,6 +317,150 @@ def _unauthorized(ctx):
                  "Cache-Control": "no-store"})
 
 
+# ---------------------------------------------------------------------------
+# Result collection
+# ---------------------------------------------------------------------------
+
+def _safe_id(value, limit=64):
+    """Accept only what can be a path segment. A workoutId arrives from the
+    client and is used to build an object name."""
+    if not value or not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value or len(value) > limit:
+        return None
+    if not all(c.isalnum() or c in "._-" for c in value):
+        return None
+    if value.startswith(".") or value == "_index":
+        return None
+    return value
+
+
+def _json_response(ctx, payload, status_code=200):
+    return response.Response(
+        ctx, status_code=status_code,
+        response_data=json.dumps(payload, separators=(",", ":")),
+        headers={"Content-Type": "application/json; charset=utf-8",
+                 "Cache-Control": "private, no-store"})
+
+
+def _read_json_object(os_client, namespace, bucket, name, default):
+    try:
+        obj = os_client.get_object(namespace, bucket, name)
+        return json.loads(obj.data.content.decode("utf-8"))
+    except oci.exceptions.ServiceError as exc:
+        if exc.status == 404:
+            return default
+        raise
+    except (ValueError, UnicodeDecodeError):
+        log.error("wodin-server: %s is not valid JSON", name)
+        return default
+
+
+def _put_json_object(os_client, namespace, bucket, name, payload):
+    os_client.put_object(
+        namespace, bucket, name,
+        json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+        content_type="application/json")
+
+
+def _summarise(result, submitted_at):
+    """The fields a history list needs, and nothing else."""
+    log_entries = result.get("log") or {}
+    return {
+        "workoutId": result.get("workoutId"),
+        "title": result.get("title"),
+        "duration": result.get("duration"),
+        "durationSec": result.get("durationSec"),
+        "rpe": result.get("rpe"),
+        "sets": len(log_entries) if isinstance(log_entries, dict) else 0,
+        "skipped": len(result.get("skipped") or []),
+        "submittedAt": submitted_at,
+    }
+
+
+def _handle_log(ctx, data, os_client, namespace, bucket, athlete_id):
+    raw = b""
+    if data is not None:
+        try:
+            raw = data.getvalue()
+        except Exception:
+            raw = b""
+    if len(raw) > _MAX_BODY_BYTES:
+        return _json_response(ctx, {"error": "result too large"}, 413)
+    try:
+        result = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return _json_response(ctx, {"error": "body is not JSON"}, 400)
+    if not isinstance(result, dict):
+        return _json_response(ctx, {"error": "body is not a result object"}, 400)
+
+    workout_id = _safe_id(result.get("workoutId"))
+    if not workout_id:
+        return _json_response(ctx, {"error": "workoutId missing or unusable"}, 400)
+    # Deliberately shallow: reject what cannot be stored coherently, and
+    # leave schema conformance to the agent reading it. A half-valid log is
+    # still the athlete's session and losing it is worse than storing it.
+    if not isinstance(result.get("log", {}), dict):
+        return _json_response(ctx, {"error": "log must be an object"}, 400)
+
+    submitted_at = datetime.now(timezone.utc).isoformat()
+    # Recorded server-side alongside whatever the client claimed: a phone
+    # logging a session at the gym may have any clock at all.
+    result["receivedAt"] = submitted_at
+    result["athleteId"] = athlete_id
+
+    base = _RESULTS_PREFIX + athlete_id + "/"
+    _put_json_object(os_client, namespace, bucket, base + workout_id + ".json", result)
+
+    index = _read_json_object(os_client, namespace, bucket, base + _INDEX_OBJECT,
+                              {"athleteId": athlete_id, "sessions": []})
+    sessions = [e for e in index.get("sessions", [])
+                if e.get("workoutId") != workout_id]
+    sessions.append(_summarise(result, submitted_at))
+    sessions.sort(key=lambda e: (e.get("submittedAt") or ""), reverse=True)
+    index["sessions"] = sessions
+    _put_json_object(os_client, namespace, bucket, base + _INDEX_OBJECT, index)
+
+    log.info("wodin-server: stored result %s for '%s'", workout_id, athlete_id)
+    return _json_response(ctx, {"ok": True, "workoutId": workout_id,
+                                "receivedAt": submitted_at}, 201)
+
+
+def _handle_history(ctx, os_client, namespace, bucket, athlete_id, tail):
+    base = _RESULTS_PREFIX + athlete_id + "/"
+    if not tail:
+        index = _read_json_object(os_client, namespace, bucket,
+                                  base + _INDEX_OBJECT,
+                                  {"athleteId": athlete_id, "sessions": []})
+        return _json_response(ctx, index)
+
+    workout_id = _safe_id(tail)
+    if not workout_id:
+        return _json_response(ctx, {"error": "bad workoutId"}, 400)
+    # Scoped to this athlete's own prefix, so one athlete cannot read
+    # another's session by asking for its id.
+    result = _read_json_object(os_client, namespace, bucket,
+                               base + workout_id + ".json", None)
+    if result is None:
+        return _json_response(ctx, {"error": "no such session"}, 404)
+    return _json_response(ctx, result)
+
+
+def _handle_api(ctx, data, method, path, os_client, namespace, bucket, athlete_id):
+    route = path[len("/api/"):].strip("/")
+    if route == "log":
+        if method != "POST":
+            return _json_response(ctx, {"error": "POST required"}, 405)
+        return _handle_log(ctx, data, os_client, namespace, bucket, athlete_id)
+    if route == "history" or route.startswith("history/"):
+        if method not in ("GET", "HEAD"):
+            return _json_response(ctx, {"error": "GET required"}, 405)
+        tail = route[len("history"):].strip("/")
+        return _handle_history(ctx, os_client, namespace, bucket, athlete_id, tail)
+    return _json_response(ctx, {"error": "no such endpoint"}, 404)
+
+
 def serve(ctx, os_client, namespace, bucket, object_name, protected=False):
     try:
         obj = os_client.get_object(namespace, bucket, object_name)
@@ -335,8 +492,16 @@ def serve(ctx, os_client, namespace, bucket, object_name, protected=False):
     return response.Response(ctx, response_data=content.decode("utf-8"), headers=headers)
 
 
+def _method(ctx):
+    try:
+        return (ctx.Method() or "GET").upper()
+    except Exception:
+        return "GET"
+
+
 def handler(ctx, data: io.BytesIO = None):
     path, query = _extract_path(ctx)
+    method = _method(ctx)
 
     signer = oci.auth.signers.get_resource_principals_signer()
     os_client = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
@@ -375,7 +540,15 @@ def handler(ctx, data: io.BytesIO = None):
         return _redirect(ctx, path if path.startswith("/") else "/" + path,
                          cookie=cookie)
 
-    if not _verify_session(secret, _cookie(ctx, _COOKIE_NAME)):
+    athlete_id = _verify_session(secret, _cookie(ctx, _COOKIE_NAME))
+    if not athlete_id:
         return _unauthorized(ctx)
+
+    # /api/ is dispatched here rather than served from the bucket. Every
+    # endpoint is scoped to the session's athlete, which is what stops one
+    # athlete reading another's sessions by knowing an id.
+    if path.startswith("/api/"):
+        return _handle_api(ctx, data, method, path, os_client, namespace,
+                           bucket, athlete_id)
 
     return serve(ctx, os_client, namespace, bucket, object_name, protected=True)
