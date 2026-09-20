@@ -71,7 +71,19 @@ jobs:
             echo "Missing secrets:$MISSING"
             exit 1
           fi
+        # Every name the loop checks is bound here under its own secret
+        # name. The job-level env exposes some of these differently --
+        # OCI_COMPARTMENT_OCID is COMPARTMENT_OCID there -- and relying on
+        # that made the check report a correctly-set secret as missing.
+        # This exact bug was found and fixed on Perch, then carried back in
+        # here by copying the earlier version of the pattern.
         env:
+          OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
+          OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
+          OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
+          OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+          OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
+          OCI_COMPARTMENT_OCID: ${{ secrets.OCI_COMPARTMENT_OCID }}
           OCIR_USERNAME: ${{ secrets.OCIR_USERNAME }}
           OCIR_AUTH_TOKEN: ${{ secrets.OCIR_AUTH_TOKEN }}
 
