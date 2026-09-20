@@ -14,7 +14,7 @@ import { ICON } from './icons.js';
 // caches under. Shown in the library so "is this thing even updated?" is a
 // question you can answer by looking, rather than by guessing.
 const BUILD = '__BUILD__';
-const REPO = 'https://github.com/BeachMonkey-AI/WODin';
+const REPO = 'https://github.com/bpuhl/WODin';
 
 // Shown on every view. The repo link is the answer to "what is this thing and can
 // I run my own?", which a workout arriving by link from a stranger's agent ought
@@ -22,7 +22,7 @@ const REPO = 'https://github.com/BeachMonkey-AI/WODin';
 const footer = () => {
   const installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
   return `<p class="foot">
-    <a href="${REPO}" target="_blank" rel="noopener">github.com/BeachMonkey-AI/WODin</a>
+    <a href="${REPO}" target="_blank" rel="noopener">github.com/bpuhl/WODin</a>
     <span>build ${esc(BUILD)}${installed ? ' · installed' : ''}</span>
   </p>`;
 };

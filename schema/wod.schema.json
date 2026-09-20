@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://beachmonkey-ai.github.io/WODin/schema/wod.schema.json",
+  "$id": "https://wod.imav8n.com/schema/wod.schema.json",
   "title": "WODin workout plan",
   "description": "A prescribed workout, written by an agent and rendered as a loggable page. Everything here is the plan; what the athlete actually did comes back in result.schema.json.",
   "type": "object",
