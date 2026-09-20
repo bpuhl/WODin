@@ -1,4 +1,45 @@
-node_modules/
+# Build output
 dist/
-public/icons/
+node_modules/
+
+# Generated icons -- committed deliberately so CI needn't build sharp's
+# native module. Uncomment if that decision is reversed.
+# public/icons/
+
+# Content never belongs in this repo: it is public, and workouts and
+# results live in the private bucket. The build copies wods/ if present,
+# which makes an accidental commit publish real data.
+wods/
+logs/
+results/
+
+# Terraform
+infra/.terraform/
+infra/.terraform.lock.hcl
+infra/*.tfstate
+infra/*.tfstate.*
+infra/*.tfvars
+infra/crash.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/*
 .claude/
+
+# Secrets - never commit
+*.pem
+*.key
+
+# Local Terraform state pulled by scripts/tf.sh (the bucket is the source
+# of truth; a stale copy here would be applied over CI's)
+infra/terraform.tfstate.backup
+
+# Not committed upstream, and CI never runs npm install -- the build uses
+# only node builtins and the icons are committed.
+package-lock.json

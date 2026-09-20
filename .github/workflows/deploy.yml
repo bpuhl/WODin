@@ -1,14 +1,204 @@
-name: Deploy
+name: Deploy WODin
 
 on:
   push:
     branches: [main]
-  pull_request:
-    types: [opened, synchronize, reopened, closed]
-    branches: [main]
+  workflow_dispatch: {}
+
+# State is a plain object with no locking, so two concurrent applies could
+# race. Queue rather than run in parallel, and never cancel a run that may
+# be mid-apply.
+concurrency:
+  group: wodin-deploy
+  cancel-in-progress: false
+
+env:
+  OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
+  OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
+  OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
+  OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+  OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
+  TF_VAR_tenancy_ocid: ${{ secrets.OCI_CLI_TENANCY }}
+  TF_VAR_user_ocid: ${{ secrets.OCI_CLI_USER }}
+  TF_VAR_fingerprint: ${{ secrets.OCI_CLI_FINGERPRINT }}
+  TF_VAR_private_key: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+  TF_VAR_region: ${{ secrets.OCI_CLI_REGION }}
+  TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
+  COMPARTMENT_OCID: ${{ secrets.OCI_COMPARTMENT_OCID }}
+  # Matches scripts/tf.sh exactly, so a local run and a CI run continue the
+  # same stack rather than forking it.
+  STATE_BUCKET: wodin-tfstate
+  STATE_OBJECT: wodin/terraform.tfstate
+  OCI_CLI_VERSION: "3.92.0"
+  SUPPRESS_LABEL_WARNING: "True"
 
 jobs:
-  ci:
-    uses: BeachMonkey-AI/app-template/.github/workflows/ci.yml@main
-  pages:
-    uses: BeachMonkey-AI/app-template/.github/workflows/pages.yml@main
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Before anything touches OCI. No credentials needed, under a second,
+      # and it means a broken build fails here rather than after an image
+      # push and a Terraform apply.
+      - name: Run tests
+        run: python3 -m unittest discover -s functions/server -p "test_*.py"
+
+      - name: Preflight — required secrets
+        run: |
+          MISSING=""
+          for s in OCI_CLI_TENANCY OCI_CLI_USER OCI_CLI_FINGERPRINT \
+                   OCI_CLI_KEY_CONTENT OCI_CLI_REGION OCI_COMPARTMENT_OCID \
+                   OCIR_USERNAME OCIR_AUTH_TOKEN; do
+            eval "V=\${$s}"
+            [ -z "$V" ] && MISSING="$MISSING $s"
+          done
+          # OCIR wants "<namespace>/<username>". A bare username survives
+          # every other check and then fails at docker login, forty seconds
+          # and an OCI CLI install into the run.
+          if [ -n "$OCIR_USERNAME" ] && [ "${OCIR_USERNAME#*/}" = "$OCIR_USERNAME" ]; then
+            echo "OCIR_USERNAME is missing its <namespace>/ prefix."
+            exit 1
+          fi
+          if [ -n "$MISSING" ]; then
+            { echo "### Missing repository secrets"; echo ""
+              for s in $MISSING; do echo "- \`$s\`"; done
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Missing secrets:$MISSING"
+            exit 1
+          fi
+        env:
+          OCIR_USERNAME: ${{ secrets.OCIR_USERNAME }}
+          OCIR_AUTH_TOKEN: ${{ secrets.OCIR_AUTH_TOKEN }}
+
+      - name: Cache oci-cli pip install
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-oci-cli-${{ env.OCI_CLI_VERSION }}-${{ runner.os }}
+
+      - name: Install OCI CLI
+        run: pip install --quiet "oci-cli==${{ env.OCI_CLI_VERSION }}"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
+
+      - name: Build the site
+        # No npm install: build.mjs uses only node builtins, and the icons
+        # are committed precisely so CI never builds sharp's native module.
+        run: node scripts/build.mjs
+
+      - name: Resolve Object Storage namespace
+        id: ns
+        run: echo "namespace=$(oci os ns get --query data --raw-output)" >> "$GITHUB_OUTPUT"
+
+      - name: Docker login to OCIR
+        run: echo "${{ secrets.OCIR_AUTH_TOKEN }}" | docker login "${OCI_CLI_REGION}.ocir.io" -u "${{ secrets.OCIR_USERNAME }}" --password-stdin
+
+      - name: Ensure the OCIR repo lives in the WODin compartment
+        run: |
+          set -euo pipefail
+          # Docker's first push auto-creates the repo in the TENANCY ROOT,
+          # which is outside this identity's grants -- so create it in the
+          # right compartment first or the push lands somewhere we cannot
+          # manage.
+          REPO="wodin-server"
+          FOUND=$(oci artifacts container repository list --compartment-id "$COMPARTMENT_OCID" \
+                    --display-name "$REPO" --query 'data.items[0].id' --raw-output 2>/dev/null || true)
+          if [ -n "${FOUND:-}" ] && [ "$FOUND" != "null" ]; then
+            echo "$REPO already present"
+          else
+            oci artifacts container repository create --compartment-id "$COMPARTMENT_OCID" \
+              --display-name "$REPO" --is-public false >/dev/null
+            echo "created $REPO"
+          fi
+
+      - name: Build & push the server image
+        id: image
+        run: |
+          set -euo pipefail
+          NS="${{ steps.ns.outputs.namespace }}"
+          IMAGE="${OCI_CLI_REGION}.ocir.io/${NS}/wodin-server:${GITHUB_SHA::12}"
+          docker build -t "$IMAGE" functions/server
+          docker push "$IMAGE"
+          echo "server_image=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Download previous Terraform state
+        run: |
+          oci os object get --namespace "${{ steps.ns.outputs.namespace }}" \
+            --bucket-name "$STATE_BUCKET" --name "$STATE_OBJECT" \
+            --file infra/terraform.tfstate \
+          || echo "No previous state -- first run."
+
+      - name: Terraform init
+        working-directory: infra
+        run: terraform init -input=false
+
+      - name: Terraform apply
+        working-directory: infra
+        env:
+          TF_VAR_server_image: ${{ steps.image.outputs.server_image }}
+        run: terraform apply -auto-approve -input=false
+
+      - name: Upload Terraform state
+        # Even on a failed apply: Terraform writes state incrementally, so
+        # a partial apply's progress is recorded rather than orphaned.
+        # Guarded on the file existing so a failure before Terraform ever
+        # ran doesn't die on a missing oci binary and bury the real error.
+        if: always() && hashFiles('infra/terraform.tfstate') != ''
+        run: |
+          oci os object put --namespace "$(oci os ns get --query data --raw-output)" \
+            --bucket-name "$STATE_BUCKET" --name "$STATE_OBJECT" \
+            --file infra/terraform.tfstate --force >/dev/null
+
+      - name: Sync the site to the bucket
+        working-directory: infra
+        run: |
+          BUCKET=$(terraform output -raw bucket_name)
+          NS=$(terraform output -raw namespace)
+          # dist/ only. wods/ and results/ live in the same bucket and are
+          # written by the agent and the function -- bulk-upload without
+          # --overwrite-all touches only the names it uploads, so they
+          # survive a deploy.
+          oci os object bulk-upload --bucket-name "$BUCKET" --namespace "$NS" \
+            --src-dir ../dist --overwrite --content-type auto
+
+      - name: Warm the function
+        working-directory: infra
+        run: |
+          FN=$(terraform output -raw server_function_id)
+          # Each deploy pushes a new image tag, so the next request is a
+          # cold start that pulls it -- long enough that whoever loads the
+          # site first would get an error. Absorb it here.
+          for i in 1 2; do
+            oci fn function invoke --function-id "$FN" --body '' --file /dev/null || true
+          done
+
+      - name: Verify assets survived the gateway
+        # The whole reason Phase 0 exists. A gateway that re-encodes a body
+        # corrupts a font while still returning 200, so bytes are compared
+        # rather than status codes.
+        working-directory: .
+        run: |
+          HOST=$(terraform -chdir=infra output -raw gateway_hostname)
+          python3 scripts/verify-assets.py "https://${HOST}"
+
+      - name: Report the CNAME target
+        working-directory: infra
+        run: |
+          {
+            echo "### WODin deployed"
+            echo ""
+            echo '```'
+            terraform output -raw gateway_hostname
+            echo ""
+            echo '```'
+            echo ""
+            echo "Cloudflare, \`imav8n.com\` zone: CNAME \`wod\` → the hostname above, proxied."
+            echo "A CNAME, not an A record — an API Gateway has no stable public IP."
+          } >> "$GITHUB_STEP_SUMMARY"
