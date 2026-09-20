@@ -38,6 +38,13 @@ ASSETS = [
     ("src/icons.js", "src/icons.js"),
 ]
 
+# Cloudflare's managed bot rules reject urllib's default User-Agent
+# ("Python-urllib/3.x") with a 403 before the request ever reaches OCI.
+# CI verifies against the gateway hostname directly and so never saw it;
+# pointed at the public domain, every asset "failed" while the site was
+# perfectly healthy. Identify the script honestly instead.
+USER_AGENT = "wodin-verify-assets/1.0 (+https://github.com/bpuhl/WODin)"
+
 EXPECTED_TYPE = {"woff2": "font/woff2", "png": "image/png", "css": "text/css",
                  "js": "application/javascript", "webmanifest": "application/manifest+json"}
 
@@ -70,12 +77,16 @@ def main():
         with open(disk, "rb") as fh:
             want = fh.read()
         url = base + "/" + path
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         try:
-            with urllib.request.urlopen(url, timeout=60) as res:
+            with urllib.request.urlopen(req, timeout=60) as res:
                 got = res.read()
                 ctype = res.headers.get("Content-Type", "")
         except urllib.error.HTTPError as exc:
-            print("  FAIL  %-38s HTTP %s" % (path, exc.code))
+            hint = ""
+            if exc.code == 403:
+                hint = "  (403 from a CDN, not the origin? check bot rules)"
+            print("  FAIL  %-38s HTTP %s%s" % (path, exc.code, hint))
             failures += 1
             continue
         except Exception as exc:
