@@ -11,8 +11,10 @@ Run: python3 -m unittest discover -s functions/server
 
 import hashlib
 import io
+import json
 import os
 import sys
+import time
 import types
 import unittest
 
@@ -154,9 +156,123 @@ class TestTextStillWorks(unittest.TestCase):
             self.assertIn(expected, res.headers["Content-Type"], name)
 
 
+def make_athlete(key, athlete_id="brian", disabled=False):
+    salt = os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", key.encode(), salt, 1000).hex()
+    a = {"id": athlete_id, "name": athlete_id.title(), "salt": salt.hex(),
+         "iterations": 1000, "hash": digest}
+    if disabled:
+        a["disabled"] = True
+    return a
+
+
+class TestTheGate(unittest.TestCase):
+    """Which paths need a key. Getting this wrong either breaks the app for
+    everyone or publishes the history, so it is asserted explicitly."""
+
+    def test_app_shell_and_assets_are_public(self):
+        for name in ("index.html", "sw.js", "manifest.webmanifest",
+                     "src/main.js", "styles/tokens.css",
+                     "fonts/barlow-400.woff2", "icons/icon-192.png"):
+            self.assertTrue(func._is_public(name), name)
+
+    def test_protocol_schemas_stay_public(self):
+        # An agent resolves $id to these; gating them breaks the contract.
+        for name in ("schema/wod.schema.json", "schema/result.schema.json",
+                     "examples/minimal.json"):
+            self.assertTrue(func._is_public(name), name)
+
+    def test_private_things_are_not_public(self):
+        for name in ("wods/2026-09-20.json", "api/history", "api/log",
+                     "auth.json", "results/brian/2026-09-20.json"):
+            self.assertFalse(func._is_public(name), name)
+
+    def test_registry_and_results_are_never_served(self):
+        # Not merely gated: an authenticated athlete must not be able to
+        # fetch the signing secret, other athletes' hashes, or another
+        # athlete's sessions by guessing an object path.
+        self.assertTrue(func._is_never_served("auth.json"))
+        self.assertTrue(func._is_never_served("results/brian/2026-09-20.json"))
+        self.assertFalse(func._is_never_served("wods/2026-09-20.json"))
+
+    def test_unknown_paths_fail_closed(self):
+        # A new asset forgotten here is gated, not published.
+        self.assertFalse(func._is_public("secret-notes.txt"))
+
+
+class TestDeviceKeys(unittest.TestCase):
+    def test_correct_key_resolves_to_its_athlete(self):
+        doc = {"athletes": [make_athlete("aaa", "brian"),
+                            make_athlete("bbb", "sam")]}
+        self.assertEqual(func._verify_key(doc, "bbb")["id"], "sam")
+
+    def test_wrong_and_empty_keys_are_rejected(self):
+        doc = {"athletes": [make_athlete("aaa", "brian")]}
+        for bad in ("", None, "aab", "AAA"):
+            self.assertIsNone(func._verify_key(doc, bad), repr(bad))
+
+    def test_disabled_athlete_is_rejected(self):
+        doc = {"athletes": [make_athlete("aaa", "brian", disabled=True)]}
+        self.assertIsNone(func._verify_key(doc, "aaa"))
+
+    def test_missing_registry_fails_closed(self):
+        # No auth.json means nothing validates, rather than everything.
+        self.assertIsNone(func._verify_key({"athletes": []}, "aaa"))
+        self.assertIsNone(func._verify_session("", "anything"))
+
+
+class TestSessions(unittest.TestCase):
+    secret = "a-signing-secret"
+
+    def test_roundtrip_carries_the_athlete(self):
+        t = func._make_session(self.secret, "brian", time.time() + 60)
+        self.assertEqual(func._verify_session(self.secret, t), "brian")
+
+    def test_expired_is_rejected(self):
+        t = func._make_session(self.secret, "brian", time.time() - 1)
+        self.assertIsNone(func._verify_session(self.secret, t))
+
+    def test_forged_athlete_is_rejected(self):
+        t = func._make_session(self.secret, "brian", time.time() + 60)
+        _, _, sig = t.rpartition(".")
+        forged = func._b64e(json.dumps({"a": "sam", "exp": 9e9}).encode()) + "." + sig
+        self.assertIsNone(func._verify_session(self.secret, forged),
+                          "a re-signed payload must not impersonate another athlete")
+
+    def test_other_secret_is_rejected(self):
+        t = func._make_session("different", "brian", time.time() + 60)
+        self.assertIsNone(func._verify_session(self.secret, t))
+
+
+class TestCookieParsing(unittest.TestCase):
+    class Ctx:
+        def __init__(self, h): self._h = h
+        def HTTPHeaders(self): return self._h
+
+    def test_picks_the_right_cookie(self):
+        ctx = self.Ctx({"Cookie": "a=1; wodin_session=tok.sig; b=2"})
+        self.assertEqual(func._cookie(ctx, "wodin_session"), "tok.sig")
+
+    def test_case_and_list_values(self):
+        ctx = self.Ctx({"cookie": ["wodin_session=xyz"]})
+        self.assertEqual(func._cookie(ctx, "wodin_session"), "xyz")
+
+    def test_absent(self):
+        self.assertIsNone(func._cookie(self.Ctx({"Cookie": "other=1"}), "wodin_session"))
+
+
 class TestRouting(unittest.TestCase):
     def test_root_is_index(self):
         self.assertEqual(func._resolve_object_name("/"), "index.html")
+
+    def test_extract_path_splits_off_the_query(self):
+        # ?key= enrolment depends on this, and the return shape changed
+        # from a bare string when it was added.
+        class Ctx:
+            def RequestURL(self): return "/wods/2026-09-20.json?key=abc123"
+        path, query = func._extract_path(Ctx())
+        self.assertEqual(path, "/wods/2026-09-20.json")
+        self.assertEqual(query, "key=abc123")
 
     def test_no_pretty_url_suffixing(self):
         # Unlike Perch. WODin routes on the fragment and ?d=, so a bare path
