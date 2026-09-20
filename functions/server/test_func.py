@@ -379,6 +379,103 @@ class TestResultCollection(unittest.TestCase):
         self.assertIn("no-store", self.history().headers["Cache-Control"])
 
 
+class TestHandlerEndToEnd(unittest.TestCase):
+    """Drives handler() itself.
+
+    Every piece below was already unit tested and all of them passed while
+    enrolment was completely broken in production: handler() checked
+    _is_public() before looking for ?key=, so the enrolment URL people are
+    actually given -- the site root -- served index.html and ignored the
+    key. Testing the parts in isolation could not see it. These drive the
+    real entry point.
+    """
+
+    class Ctx:
+        def __init__(self, url, method="GET", cookie=None):
+            self._url, self._method = url, method
+            self._headers = {"Cookie": cookie} if cookie else {}
+            self.sent = {}
+        def RequestURL(self): return self._url
+        def Method(self): return self._method
+        def HTTPHeaders(self): return self._headers
+
+    def setUp(self):
+        self.key = "test-device-key"
+        athlete = make_athlete(self.key, "brian")
+        auth = {"session_secret": "s" * 64, "session_days": 365,
+                "athletes": [athlete]}
+        self.bucket = FakeBucket({
+            "auth.json": json.dumps(auth).encode(),
+            "index.html": b"<!doctype html><title>WODin</title>",
+            "wods/2026-09-20.json": b'{"schema":"wodin/wod@1"}',
+        })
+        func._cache["doc"] = None      # the registry cache is module-level
+        func._cache["at"] = 0.0
+        self._real = func.oci.object_storage.ObjectStorageClient
+        func.oci.object_storage.ObjectStorageClient = lambda **kw: self.bucket
+        os.environ["NAMESPACE"] = "ns"; os.environ["BUCKET_NAME"] = "b"
+
+    def tearDown(self):
+        func.oci.object_storage.ObjectStorageClient = self._real
+        func._cache["doc"] = None
+
+    def cookie_from(self, res):
+        raw = res.headers.get("Set-Cookie", "")
+        return raw.split(";")[0] if raw else None
+
+    def test_enrolling_at_the_site_root_works(self):
+        # The regression. This is the URL manage-athletes.py prints.
+        res = func.handler(self.Ctx("/?key=" + self.key))
+        self.assertEqual(res.status_code, 303, "root enrolment must set a session")
+        self.assertIn("wodin_session=", res.headers.get("Set-Cookie", ""))
+        self.assertIn("HttpOnly", res.headers["Set-Cookie"])
+        self.assertEqual(res.headers["Location"], "/", "key must be stripped")
+
+    def test_the_session_then_opens_a_gated_path(self):
+        enrol = func.handler(self.Ctx("/?key=" + self.key))
+        res = func.handler(self.Ctx("/wods/2026-09-20.json",
+                                    cookie=self.cookie_from(enrol)))
+        self.assertEqual(res.status_code, 200)
+
+    def test_enrolling_on_a_gated_path_redirects_back_to_it(self):
+        res = func.handler(self.Ctx("/wods/2026-09-20.json?key=" + self.key))
+        self.assertEqual(res.status_code, 303)
+        self.assertEqual(res.headers["Location"], "/wods/2026-09-20.json")
+
+    def test_app_still_loads_with_no_key_at_all(self):
+        res = func.handler(self.Ctx("/"))
+        self.assertEqual(res.status_code, 200)
+
+    def test_a_bad_key_does_not_lock_the_app(self):
+        # A mistyped key on a public path must serve the page, not 401 --
+        # otherwise one bad link makes the site look broken.
+        res = func.handler(self.Ctx("/?key=wrong"))
+        self.assertEqual(res.status_code, 200)
+
+    def test_a_bad_key_on_a_gated_path_still_refuses(self):
+        res = func.handler(self.Ctx("/wods/2026-09-20.json?key=wrong"))
+        self.assertEqual(res.status_code, 401)
+
+    def test_gated_path_without_a_session_refuses(self):
+        res = func.handler(self.Ctx("/wods/2026-09-20.json"))
+        self.assertEqual(res.status_code, 401)
+
+    def test_post_and_read_back_through_the_handler(self):
+        enrol = func.handler(self.Ctx("/?key=" + self.key))
+        c = self.cookie_from(enrol)
+        body = json.dumps({"schema": "wodin/result@1", "workoutId": "2026-09-20",
+                           "rpe": 8, "log": {"ex1.s1": {"reps": 5}}}).encode()
+        posted = func.handler(self.Ctx("/api/log", method="POST", cookie=c),
+                              io.BytesIO(body))
+        self.assertEqual(posted.status_code, 201)
+        hist = func.handler(self.Ctx("/api/history", cookie=c))
+        self.assertEqual(json.loads(hist.response_data)["sessions"][0]["rpe"], 8)
+
+    def test_api_requires_a_session(self):
+        res = func.handler(self.Ctx("/api/history"))
+        self.assertEqual(res.status_code, 401)
+
+
 class TestCaching(unittest.TestCase):
     def test_shell_is_not_cached_hard(self):
         # A cached sw.js or index.html pins installed PWAs to an old build

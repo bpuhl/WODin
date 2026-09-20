@@ -512,22 +512,31 @@ def handler(ctx, data: io.BytesIO = None):
     if object_name is None or _is_never_served(object_name):
         return _not_found(ctx)
 
-    # Public paths skip the registry read entirely -- the common case (an
-    # athlete loading the app) costs no extra bucket fetch.
-    if _is_public(object_name):
+    # Enrolment is checked BEFORE the public-path shortcut, because the
+    # enrolment URL people are actually given is the site root -- which is
+    # public. Testing _is_public() first meant "/?key=..." served
+    # index.html and silently ignored the key, so no session was ever
+    # established and every gated path kept refusing.
+    key = (parse_qs(query).get("key", [""])[0] or "").strip()
+
+    # Public paths with no key skip the registry read entirely, so the
+    # common case -- an athlete loading the app -- costs no extra fetch.
+    if not key and _is_public(object_name):
         return serve(ctx, os_client, namespace, bucket, object_name)
 
     doc = _load_auth(os_client, namespace, bucket)
     secret = doc.get("session_secret", "")
 
-    # Enrolment: ?key=<device key> on any path. Validated here rather than
-    # in the app so the key never has to reach JavaScript, and the session
-    # cookie can be HttpOnly.
-    key = (parse_qs(query).get("key", [""])[0] or "").strip()
+    # Validated here rather than in the app, so the key never reaches
+    # JavaScript and the session cookie can be HttpOnly.
     if key:
         athlete = _verify_key(doc, key)
         if not athlete:
             log.info("wodin-server: rejected enrolment attempt")
+            # A bad key on a public path must not lock the app: serve the
+            # page as normal. Only a gated path refuses.
+            if _is_public(object_name):
+                return serve(ctx, os_client, namespace, bucket, object_name)
             return _unauthorized(ctx)
         days = int(doc.get("session_days", 365))
         expires_at = time.time() + days * 86400
@@ -542,6 +551,8 @@ def handler(ctx, data: io.BytesIO = None):
 
     athlete_id = _verify_session(secret, _cookie(ctx, _COOKIE_NAME))
     if not athlete_id:
+        if _is_public(object_name):
+            return serve(ctx, os_client, namespace, bucket, object_name)
         return _unauthorized(ctx)
 
     # /api/ is dispatched here rather than served from the bucket. Every
