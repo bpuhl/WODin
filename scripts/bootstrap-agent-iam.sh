@@ -44,7 +44,7 @@ fi
 [ -n "$TENANCY" ] || { echo "Could not determine the tenancy OCID. Pass it as the third argument." >&2; exit 2; }
 
 DATA_BUCKET="${DATA_BUCKET:-wodin-data}"
-DG_NAME="${DG_NAME:-claudbot-agents}"
+DG_NAME="${DG_NAME:-claudebot-agents}"
 POLICY_NAME="${POLICY_NAME:-wodin-agent-access}"
 
 echo "wodin compartment : $WODIN_COMPARTMENT"
@@ -64,6 +64,12 @@ exists() {
     --query "data[?name=='$2'].id" --raw-output 2>/dev/null | grep -q ocid1
 }
 
+# NOTE THE SPELLING: the group is "claudebot-agents" (with an e) while the
+# compartment is "ClaudBot" (without). They genuinely differ. OCI accepts a
+# policy naming a group that does not exist and silently grants nothing, so
+# a typo here fails open-looking and closed-behaving -- the worst kind.
+# Override with DG_NAME if it is ever renamed.
+#
 # Matches every instance in the agent's compartment. If the agent is ever
 # one instance among several there, narrow this to instance.id.
 if exists dynamic-group "$DG_NAME"; then
