@@ -45,6 +45,12 @@ jobs:
       # Before anything touches OCI. No credentials needed, under a second,
       # and it means a broken build fails here rather than after an image
       # push and a Terraform apply.
+      # Before the tests: one of them checks the service worker precaches
+      # everything dist/ actually contains, and the repo layout differs
+      # from the built one.
+      - name: Build the site
+        run: node scripts/build.mjs
+
       - name: Run tests
         run: |
           python3 -m unittest discover -s functions/server -p "test_*.py"
@@ -104,11 +110,6 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.7.5"
-
-      - name: Build the site
-        # No npm install: build.mjs uses only node builtins, and the icons
-        # are committed precisely so CI never builds sharp's native module.
-        run: node scripts/build.mjs
 
       - name: Resolve Object Storage namespace
         id: ns
