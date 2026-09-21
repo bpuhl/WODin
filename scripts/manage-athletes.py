@@ -35,6 +35,12 @@ from datetime import date
 
 BUCKET = os.environ.get("WODIN_BUCKET", "wodin-site")
 OBJECT = "auth.json"
+
+# The agent needs to know who exists, in order to build a workout per
+# athlete. It must never read auth.json -- that holds the session signing
+# secret and every key hash -- so the public facts are mirrored here:
+# ids, names, and where each athlete's workouts and results live.
+ROSTER = "roster.json"
 SITE = os.environ.get("WODIN_SITE", "https://wod.imav8n.com")
 PBKDF2_ITERATIONS = 200000
 KEY_BYTES = 24            # ~32 url-safe chars; typed once, then remembered
@@ -67,6 +73,38 @@ def load(ns):
         os.path.exists(tmp) and os.unlink(tmp)
 
 
+def write_roster(doc, ns):
+    """Mirror the non-secret facts for the agent.
+
+    Rewritten from auth.json on every change rather than edited in place,
+    so it cannot drift into claiming an athlete who no longer exists.
+    """
+    roster = {
+        "version": 1,
+        "generated": date.today().isoformat(),
+        "athletes": [
+            {
+                "id": a["id"],
+                "name": a.get("name") or a["id"].title(),
+                "disabled": bool(a.get("disabled")),
+                "wods": "wods/%s/" % a["id"],
+                "results": "results/%s/" % a["id"],
+            }
+            for a in sorted(doc.get("athletes", []), key=lambda x: x.get("id", ""))
+        ],
+    }
+    fd, tmp = tempfile.mkstemp(suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(roster, fh, indent=2)
+    try:
+        run(["oci", "os", "object", "put", "--namespace", ns,
+             "--bucket-name", BUCKET, "--name", ROSTER, "--file", tmp,
+             "--force", "--content-type", "application/json"])
+        print("Updated %s (%d athlete(s))." % (ROSTER, len(roster["athletes"])))
+    finally:
+        os.unlink(tmp)
+
+
 def save(doc, ns):
     # Rotating the signing secret logs every athlete out, so it is created
     # once and then left alone.
@@ -83,6 +121,7 @@ def save(doc, ns):
         print("Updated %s." % OBJECT)
     finally:
         os.unlink(tmp)
+    write_roster(doc, ns)
 
 
 def find(doc, athlete_id):
@@ -115,6 +154,8 @@ def cmd_add(args, doc):
     print("  Open this once on the device; the key is then remembered:")
     print()
     print("    %s/?key=%s" % (SITE, key))
+    print()
+    print("  Their workouts go to wods/%s/<date>.json" % args.id)
     print()
     print("  Shown once and not recoverable -- only a hash is stored.")
     print("=" * 72)

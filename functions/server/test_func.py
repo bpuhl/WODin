@@ -195,6 +195,8 @@ class TestTheGate(unittest.TestCase):
         # fetch the signing secret, other athletes' hashes, or another
         # athlete's sessions by guessing an object path.
         self.assertTrue(func._is_never_served("auth.json"))
+        # No secrets in it, but one athlete has no need for the others' names.
+        self.assertTrue(func._is_never_served("roster.json"))
         self.assertTrue(func._is_never_served("results/brian/2026-09-20.json"))
         self.assertFalse(func._is_never_served("wods/2026-09-20.json"))
 
@@ -407,7 +409,8 @@ class TestHandlerEndToEnd(unittest.TestCase):
         self.bucket = FakeBucket({
             "auth.json": json.dumps(auth).encode(),
             "index.html": b"<!doctype html><title>WODin</title>",
-            "wods/2026-09-20.json": b'{"schema":"wodin/wod@1"}',
+            "wods/brian/2026-09-20.json": b'{"schema":"wodin/wod@1","for":"brian"}',
+            "wods/sam/2026-09-20.json": b'{"schema":"wodin/wod@1","for":"sam"}',
         })
         func._cache["doc"] = None      # the registry cache is module-level
         func._cache["at"] = 0.0
@@ -474,6 +477,42 @@ class TestHandlerEndToEnd(unittest.TestCase):
     def test_api_requires_a_session(self):
         res = func.handler(self.Ctx("/api/history"))
         self.assertEqual(res.status_code, 401)
+
+    # --- per-athlete workouts (#12) -------------------------------------
+
+    def enrolled(self):
+        return self.cookie_from(func.handler(self.Ctx("/?key=" + self.key)))
+
+    def test_athlete_gets_their_own_workout(self):
+        res = func.handler(self.Ctx("/wods/2026-09-20.json", cookie=self.enrolled()))
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(json.loads(res.response_data)["for"], "brian",
+                         "the session's athlete decides which workout is served")
+
+    def test_cannot_reach_another_athletes_workout_by_url(self):
+        # There is no athlete in the URL to change, so this resolves under
+        # the caller's own prefix and simply misses.
+        res = func.handler(self.Ctx("/wods/sam/2026-09-20.json", cookie=self.enrolled()))
+        self.assertEqual(res.status_code, 404)
+
+    def test_traversal_out_of_the_athlete_prefix_is_refused(self):
+        for evil in ("/wods/../auth.json", "/wods/../../auth.json",
+                     "/wods/brian/../../auth.json"):
+            res = func.handler(self.Ctx(evil, cookie=self.enrolled()))
+            self.assertIn(res.status_code, (404,), evil)
+
+    def test_a_missing_workout_is_a_clean_404(self):
+        res = func.handler(self.Ctx("/wods/2099-01-01.json", cookie=self.enrolled()))
+        self.assertEqual(res.status_code, 404)
+
+    def test_workouts_still_need_a_session(self):
+        self.assertEqual(func.handler(self.Ctx("/wods/2026-09-20.json")).status_code, 401)
+
+    def test_the_prefix_mapping_itself(self):
+        self.assertEqual(func._athlete_workout_object("brian", "/wods/2026-09-20.json"),
+                         "wods/brian/2026-09-20.json")
+        self.assertIsNone(func._athlete_workout_object("brian", "/wods/"))
+        self.assertIsNone(func._athlete_workout_object("brian", "/wods/../x"))
 
 
 class TestCaching(unittest.TestCase):

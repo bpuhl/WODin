@@ -104,8 +104,15 @@ _PUBLIC_PREFIXES = ("src/", "styles/", "fonts/", "icons/", "schema/", "examples/
 # secret and every athlete's hash; results are read through /api, never as
 # raw objects, so that one athlete cannot fetch another's sessions by
 # guessing a path.
-_NEVER_SERVE = frozenset(["auth.json"])
+# roster.json carries no secrets, but the agent reads it from the bucket
+# directly rather than over HTTP -- so serving it would only hand one
+# athlete the names of all the others for no benefit.
+_NEVER_SERVE = frozenset(["auth.json", "roster.json"])
 _NEVER_SERVE_PREFIXES = ("results/",)
+
+# wods/ is reachable, but only through the session's own prefix -- see
+# _athlete_object(). A literal request for "wods/<someone>/..." resolves
+# under the caller's prefix and simply misses.
 
 _AUTH_OBJECT = "auth.json"
 
@@ -115,6 +122,18 @@ _AUTH_OBJECT = "auth.json"
 # which is what a corrected log should do.
 _RESULTS_PREFIX = "results/"
 _INDEX_OBJECT = "_index.json"
+
+# Workouts are per-athlete, so the agent can read one person's history and
+# build for them specifically. The athlete is NOT in the request URL: the
+# app asks for /wods/<date>.json and this prefix is applied from the
+# session. That keeps the app unchanged, and means one athlete cannot
+# reach another's workout by editing a URL -- there is nothing in it to
+# edit.
+_WODS_PREFIX = "wods/"
+
+# Ids and display names only, for the agent. Never the signing secret or
+# any key hash -- those stay in auth.json, which is never served.
+_ROSTER_OBJECT = "roster.json"
 
 # A summary index per athlete, maintained on write. History is then one
 # object read instead of fetching every session to build a list -- which
@@ -447,6 +466,20 @@ def _handle_history(ctx, os_client, namespace, bucket, athlete_id, tail):
     return _json_response(ctx, result)
 
 
+def _athlete_workout_object(athlete_id, path):
+    """Map a /wods/ request onto this athlete's own prefix.
+
+    The tail is whatever followed /wods/. It is joined under
+    wods/<athlete>/, so "/wods/sam/2026-09-20.json" becomes
+    "wods/brian/sam/2026-09-20.json" and misses -- the isolation is
+    structural rather than a check that could be forgotten.
+    """
+    tail = path[len("/wods/"):].strip("/")
+    if not tail or ".." in tail:
+        return None
+    return _WODS_PREFIX + athlete_id + "/" + tail
+
+
 def _handle_api(ctx, data, method, path, os_client, namespace, bucket, athlete_id):
     route = path[len("/api/"):].strip("/")
     if route == "log":
@@ -561,5 +594,13 @@ def handler(ctx, data: io.BytesIO = None):
     if path.startswith("/api/"):
         return _handle_api(ctx, data, method, path, os_client, namespace,
                            bucket, athlete_id)
+
+    # A workout request is rewritten onto the caller's own prefix. The app
+    # asks for /wods/<date>.json and never knows the athlete is there.
+    if path.startswith("/wods/"):
+        scoped = _athlete_workout_object(athlete_id, path)
+        if scoped is None:
+            return _not_found(ctx)
+        return serve(ctx, os_client, namespace, bucket, scoped, protected=True)
 
     return serve(ctx, os_client, namespace, bucket, object_name, protected=True)
