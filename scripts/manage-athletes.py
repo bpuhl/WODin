@@ -33,8 +33,13 @@ import sys
 import tempfile
 from datetime import date
 
+# auth.json stays in the site bucket, which the agent has no grant on.
 BUCKET = os.environ.get("WODIN_BUCKET", "wodin-site")
 OBJECT = "auth.json"
+
+# roster.json goes in the DATA bucket, which is the only one the agent can
+# read -- that is the whole point of the split.
+DATA_BUCKET = os.environ.get("WODIN_DATA_BUCKET", "wodin-data")
 
 # The agent needs to know who exists, in order to build a workout per
 # athlete. It must never read auth.json -- that holds the session signing
@@ -98,9 +103,10 @@ def write_roster(doc, ns):
         json.dump(roster, fh, indent=2)
     try:
         run(["oci", "os", "object", "put", "--namespace", ns,
-             "--bucket-name", BUCKET, "--name", ROSTER, "--file", tmp,
+             "--bucket-name", DATA_BUCKET, "--name", ROSTER, "--file", tmp,
              "--force", "--content-type", "application/json"])
-        print("Updated %s (%d athlete(s))." % (ROSTER, len(roster["athletes"])))
+        print("Updated %s in %s (%d athlete(s))."
+              % (ROSTER, DATA_BUCKET, len(roster["athletes"])))
     finally:
         os.unlink(tmp)
 

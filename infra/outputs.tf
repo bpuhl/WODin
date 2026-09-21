@@ -7,6 +7,10 @@ output "bucket_name" {
   value = oci_objectstorage_bucket.site.name
 }
 
+output "data_bucket_name" {
+  value = oci_objectstorage_bucket.data.name
+}
+
 output "namespace" {
   value = data.oci_objectstorage_namespace.ns.namespace
 }

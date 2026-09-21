@@ -72,13 +72,20 @@ class FakeBucket:
 
     def __init__(self, objects):
         self.objects = objects
+        # (bucket, name) pairs, so tests can assert WHICH bucket was used --
+        # the whole point of the split is that auth.json never comes from
+        # the one the agent can reach.
+        self.reads = []
+        self.writes = []
 
     def get_object(self, namespace, bucket, name):
+        self.reads.append((bucket, name))
         if name not in self.objects:
             raise _ServiceError(404)
         return types.SimpleNamespace(data=types.SimpleNamespace(content=self.objects[name]))
 
     def put_object(self, namespace, bucket, name, body, **kw):
+        self.writes.append((bucket, name))
         self.objects[name] = body
 
 
@@ -416,7 +423,9 @@ class TestHandlerEndToEnd(unittest.TestCase):
         func._cache["at"] = 0.0
         self._real = func.oci.object_storage.ObjectStorageClient
         func.oci.object_storage.ObjectStorageClient = lambda **kw: self.bucket
-        os.environ["NAMESPACE"] = "ns"; os.environ["BUCKET_NAME"] = "b"
+        os.environ["NAMESPACE"] = "ns"
+        os.environ["BUCKET_NAME"] = "site"
+        os.environ["DATA_BUCKET_NAME"] = "data"
 
     def tearDown(self):
         func.oci.object_storage.ObjectStorageClient = self._real
@@ -507,6 +516,33 @@ class TestHandlerEndToEnd(unittest.TestCase):
 
     def test_workouts_still_need_a_session(self):
         self.assertEqual(func.handler(self.Ctx("/wods/2026-09-20.json")).status_code, 401)
+
+    # --- the two-bucket boundary (#5) -----------------------------------
+
+    def test_auth_is_read_from_the_site_bucket_not_the_data_bucket(self):
+        # The agent has a grant on the data bucket only. If the signing
+        # secret were read from there, the split would buy nothing.
+        self.bucket.reads = []
+        func.handler(self.Ctx("/?key=" + self.key))
+        self.assertIn(("site", "auth.json"), self.bucket.reads,
+                      "auth.json must come from the site bucket")
+        self.assertNotIn(("data", "auth.json"), self.bucket.reads)
+
+    def test_workouts_and_results_use_the_data_bucket(self):
+        c = self.enrolled()
+        self.bucket.reads = []
+        func.handler(self.Ctx("/wods/2026-09-20.json", cookie=c))
+        self.assertTrue(any(b == "data" for b, _ in self.bucket.reads),
+                        "a workout must be read from the data bucket")
+        body = json.dumps({"workoutId": "d1", "log": {}}).encode()
+        func.handler(self.Ctx("/api/log", method="POST", cookie=c), io.BytesIO(body))
+        self.assertTrue(any(b == "data" for b, _ in self.bucket.writes),
+                        "a result must be written to the data bucket")
+
+    def test_app_assets_stay_on_the_site_bucket(self):
+        self.bucket.reads = []
+        func.handler(self.Ctx("/"))
+        self.assertIn(("site", "index.html"), self.bucket.reads)
 
     def test_the_prefix_mapping_itself(self):
         self.assertEqual(func._athlete_workout_object("brian", "/wods/2026-09-20.json"),

@@ -44,6 +44,12 @@ variable "site_bucket_name" {
   default     = "wodin-site"
 }
 
+variable "data_bucket_name" {
+  description = "Bucket holding roster.json, wods/ and results/ -- the only bucket the agent is granted"
+  type        = string
+  default     = "wodin-data"
+}
+
 variable "vcn_cidr" {
   description = "CIDR for the WODin VCN. Distinct from Pulse (10.20) and Perch (10.30) so the three could be peered later without renumbering."
   type        = string

@@ -53,10 +53,11 @@ if [ -z "$TENANCY" ]; then
 fi
 
 BUCKET="${BUCKET:-wodin-site}"
+DATA_BUCKET="${DATA_BUCKET:-wodin-data}"
 
 echo "compartment : $COMPARTMENT"
 echo "tenancy     : $TENANCY"
-echo "bucket      : $BUCKET"
+echo "buckets     : $BUCKET (app + auth.json), $DATA_BUCKET (roster, wods, results)"
 $DRY_RUN && echo "MODE        : dry run, nothing will be created"
 echo
 
@@ -101,6 +102,7 @@ ensure_dg "wodin-gateway" "WODin API Gateway" \
 STATEMENTS=$(cat <<EOF
 [
   "Allow dynamic-group wodin-functions to manage objects in compartment id $COMPARTMENT where target.bucket.name = '$BUCKET'",
+  "Allow dynamic-group wodin-functions to manage objects in compartment id $COMPARTMENT where target.bucket.name = '$DATA_BUCKET'",
   "Allow dynamic-group wodin-functions to read buckets in compartment id $COMPARTMENT",
   "Allow dynamic-group wodin-gateway to use functions-family in compartment id $COMPARTMENT"
 ]
