@@ -9,6 +9,7 @@
  */
 
 import { ICON } from './icons.js';
+import { isAsPlanned } from './planned.js';
 
 // Replaced by scripts/build.mjs with the same content hash the service worker
 // caches under. Shown in the library so "is this thing even updated?" is a
@@ -745,17 +746,6 @@ function buildDigest() {
 
 const num = v => (v === '' || v == null) ? null : (isNaN(Number(v)) ? v : Number(v));
 
-function isAsPlanned(set, v, kind) {
-  if (set._added) return false;
-  const same = (a, b) => String(a ?? '') === String(b ?? '');
-  const loadOk = set.loadType === 'bodyweight' ? v.load === 'BW' : same(v.load, set.load);
-  if (kind === 'weight_reps') return loadOk && same(v.reps, set.reps);
-  if (kind === 'reps')        return same(v.reps, set.reps);
-  if (kind === 'time')        return same(v.duration, set.duration);
-  if (kind === 'carry')       return loadOk && same(v.reps, set.reps) && same(v.distance, set.distance);
-  if (kind === 'cardio')      return same(v.distance, set.distance) && same(v.duration, set.duration);
-  return true;
-}
 
 function buildResult() {
   const log = {}, notes = {}, exerciseRpe = {};
