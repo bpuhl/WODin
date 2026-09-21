@@ -36,6 +36,16 @@ node cli/wodin.mjs link examples/routine-2-back-biceps.json
 
 Send that link. That's the whole integration.
 
+## Running on OCI
+
+This fork is deployed at **https://wod.imav8n.com**, with device-key access,
+per-athlete workouts, and stored history. [`DEPLOYMENT.md`](DEPLOYMENT.md) is
+the contract for that: where an agent publishes, how it reads history, and
+what the site serves to whom.
+
+`AGENT.md` below remains upstream's protocol and is unchanged — the two JSON
+documents and the link. `DEPLOYMENT.md` is the other half.
+
 ## For agents
 
 **[`AGENT.md`](AGENT.md) is the protocol** — one file that teaches any agent the whole
