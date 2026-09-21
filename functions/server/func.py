@@ -22,6 +22,19 @@ whether the API Gateway relays those bytes intact -- that is the one hop
 with no local test, and scripts/verify-assets.py checks it against a
 deployed site by comparing SHA-256 with the source files.
 
+TWO BUCKETS, AND WHY
+--------------------
+  BUCKET_NAME       the app, and auth.json. The function alone.
+  DATA_BUCKET_NAME  roster.json, wods/, results/. The function and the agent.
+
+The agent needs to read an athlete's history and publish their next
+workout, which means a grant on whatever holds them. With one bucket that
+grant necessarily includes auth.json -- the session signing secret -- and
+anything holding that can forge any athlete's session. Object-name
+conditions could express the distinction, but ListObjects is bucket-level
+and cannot be prefix-scoped, so the agent would still see every object
+name. A second bucket makes the boundary real instead of conventional.
+
 THE GATE IS PARTIAL, ON PURPOSE
 ------------------------------
 WODin's sharing model puts the workout in the URL fragment, so a #w= link
@@ -114,6 +127,7 @@ _NEVER_SERVE_PREFIXES = ("results/",)
 # _athlete_object(). A literal request for "wods/<someone>/..." resolves
 # under the caller's prefix and simply misses.
 
+# Stays in the site bucket, which the agent has no grant on at all.
 _AUTH_OBJECT = "auth.json"
 
 # Results are keyed by the protocol's own workoutId rather than by a date
@@ -131,8 +145,9 @@ _INDEX_OBJECT = "_index.json"
 # edit.
 _WODS_PREFIX = "wods/"
 
-# Ids and display names only, for the agent. Never the signing secret or
-# any key hash -- those stay in auth.json, which is never served.
+# Ids and display names only, in the DATA bucket so the agent can read it.
+# Never the signing secret or any key hash -- those stay in auth.json, in
+# the other bucket entirely.
 _ROSTER_OBJECT = "roster.json"
 
 # A summary index per athlete, maintained on write. History is then one
@@ -398,7 +413,7 @@ def _summarise(result, submitted_at):
     }
 
 
-def _handle_log(ctx, data, os_client, namespace, bucket, athlete_id):
+def _handle_log(ctx, data, os_client, namespace, data_bucket, athlete_id):
     raw = b""
     if data is not None:
         try:
@@ -430,26 +445,26 @@ def _handle_log(ctx, data, os_client, namespace, bucket, athlete_id):
     result["athleteId"] = athlete_id
 
     base = _RESULTS_PREFIX + athlete_id + "/"
-    _put_json_object(os_client, namespace, bucket, base + workout_id + ".json", result)
+    _put_json_object(os_client, namespace, data_bucket, base + workout_id + ".json", result)
 
-    index = _read_json_object(os_client, namespace, bucket, base + _INDEX_OBJECT,
+    index = _read_json_object(os_client, namespace, data_bucket, base + _INDEX_OBJECT,
                               {"athleteId": athlete_id, "sessions": []})
     sessions = [e for e in index.get("sessions", [])
                 if e.get("workoutId") != workout_id]
     sessions.append(_summarise(result, submitted_at))
     sessions.sort(key=lambda e: (e.get("submittedAt") or ""), reverse=True)
     index["sessions"] = sessions
-    _put_json_object(os_client, namespace, bucket, base + _INDEX_OBJECT, index)
+    _put_json_object(os_client, namespace, data_bucket, base + _INDEX_OBJECT, index)
 
     log.info("wodin-server: stored result %s for '%s'", workout_id, athlete_id)
     return _json_response(ctx, {"ok": True, "workoutId": workout_id,
                                 "receivedAt": submitted_at}, 201)
 
 
-def _handle_history(ctx, os_client, namespace, bucket, athlete_id, tail):
+def _handle_history(ctx, os_client, namespace, data_bucket, athlete_id, tail):
     base = _RESULTS_PREFIX + athlete_id + "/"
     if not tail:
-        index = _read_json_object(os_client, namespace, bucket,
+        index = _read_json_object(os_client, namespace, data_bucket,
                                   base + _INDEX_OBJECT,
                                   {"athleteId": athlete_id, "sessions": []})
         return _json_response(ctx, index)
@@ -459,7 +474,7 @@ def _handle_history(ctx, os_client, namespace, bucket, athlete_id, tail):
         return _json_response(ctx, {"error": "bad workoutId"}, 400)
     # Scoped to this athlete's own prefix, so one athlete cannot read
     # another's session by asking for its id.
-    result = _read_json_object(os_client, namespace, bucket,
+    result = _read_json_object(os_client, namespace, data_bucket,
                                base + workout_id + ".json", None)
     if result is None:
         return _json_response(ctx, {"error": "no such session"}, 404)
@@ -480,17 +495,17 @@ def _athlete_workout_object(athlete_id, path):
     return _WODS_PREFIX + athlete_id + "/" + tail
 
 
-def _handle_api(ctx, data, method, path, os_client, namespace, bucket, athlete_id):
+def _handle_api(ctx, data, method, path, os_client, namespace, data_bucket, athlete_id):
     route = path[len("/api/"):].strip("/")
     if route == "log":
         if method != "POST":
             return _json_response(ctx, {"error": "POST required"}, 405)
-        return _handle_log(ctx, data, os_client, namespace, bucket, athlete_id)
+        return _handle_log(ctx, data, os_client, namespace, data_bucket, athlete_id)
     if route == "history" or route.startswith("history/"):
         if method not in ("GET", "HEAD"):
             return _json_response(ctx, {"error": "GET required"}, 405)
         tail = route[len("history"):].strip("/")
-        return _handle_history(ctx, os_client, namespace, bucket, athlete_id, tail)
+        return _handle_history(ctx, os_client, namespace, data_bucket, athlete_id, tail)
     return _json_response(ctx, {"error": "no such endpoint"}, 404)
 
 
@@ -540,6 +555,9 @@ def handler(ctx, data: io.BytesIO = None):
     os_client = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
     namespace = os.environ["NAMESPACE"]
     bucket = os.environ["BUCKET_NAME"]
+    # The agent holds a grant on this one and none at all on the site
+    # bucket, which is what keeps auth.json out of its reach.
+    data_bucket = os.environ.get("DATA_BUCKET_NAME", bucket)
 
     object_name = _resolve_object_name(path)
     if object_name is None or _is_never_served(object_name):
@@ -593,7 +611,7 @@ def handler(ctx, data: io.BytesIO = None):
     # athlete reading another's sessions by knowing an id.
     if path.startswith("/api/"):
         return _handle_api(ctx, data, method, path, os_client, namespace,
-                           bucket, athlete_id)
+                           data_bucket, athlete_id)
 
     # A workout request is rewritten onto the caller's own prefix. The app
     # asks for /wods/<date>.json and never knows the athlete is there.
@@ -601,6 +619,6 @@ def handler(ctx, data: io.BytesIO = None):
         scoped = _athlete_workout_object(athlete_id, path)
         if scoped is None:
             return _not_found(ctx)
-        return serve(ctx, os_client, namespace, bucket, scoped, protected=True)
+        return serve(ctx, os_client, namespace, data_bucket, scoped, protected=True)
 
     return serve(ctx, os_client, namespace, bucket, object_name, protected=True)

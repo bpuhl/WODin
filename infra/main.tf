@@ -96,6 +96,25 @@ resource "oci_objectstorage_bucket" "site" {
   versioning = "Enabled"
 }
 
+# The agent reads history and publishes workouts, so it needs a grant on
+# whatever holds them. With a single bucket that grant necessarily covers
+# auth.json -- the session signing secret -- and anything holding that can
+# forge any athlete's session. Object-name conditions could express the
+# distinction, but ListObjects is bucket-level and cannot be prefix-scoped,
+# so the agent would still see every object name. A second bucket makes the
+# boundary real rather than conventional.
+resource "oci_objectstorage_bucket" "data" {
+  compartment_id = var.compartment_ocid
+  namespace      = data.oci_objectstorage_namespace.ns.namespace
+  name           = var.data_bucket_name
+  access_type    = "NoPublicAccess"
+  storage_tier   = "Standard"
+
+  # Results are the only thing across both buckets that cannot be rebuilt
+  # from the repo, and this is also the bucket a third party writes to.
+  versioning = "Enabled"
+}
+
 # ---------------------------------------------------------------------------
 # NO IAM IN THIS FILE — deliberately.
 #
@@ -129,8 +148,9 @@ resource "oci_functions_function" "server" {
   timeout_in_seconds = 120
 
   config = {
-    BUCKET_NAME = oci_objectstorage_bucket.site.name
-    NAMESPACE   = data.oci_objectstorage_namespace.ns.namespace
+    BUCKET_NAME      = oci_objectstorage_bucket.site.name
+    DATA_BUCKET_NAME = oci_objectstorage_bucket.data.name
+    NAMESPACE        = data.oci_objectstorage_namespace.ns.namespace
   }
 }
 
