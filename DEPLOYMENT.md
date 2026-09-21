@@ -76,6 +76,34 @@ actually took it, as opposed to whatever the phone's clock claimed).
 history is one object, and it stays correct because it is rewritten on
 every submission.
 
+#### Reading cardio: pace is always per 500m
+
+For rowing, `pace` means **time per 500 metres**, whatever the interval's
+actual distance is. A 250m rep at `2:15` pace is a 2:15/500m split, not a
+2:15 rep.
+
+This is a house convention, not a protocol rule — the schema deliberately
+keeps `pace` generic ("the denominator becomes the field's unit suffix"),
+so `/mile` and `/km` are equally valid for other movements. It is written
+down here because **the stored result drops the denominator**: a plan says
+`"pace": "2:15/500m"` and the logged entry comes back `"pace": "2:15"`.
+Without the convention, history is genuinely ambiguous — the same string
+could be a 500m split or a rep time.
+
+Write the denominator in the plan; assume `/500m` when reading a rowing
+result back.
+
+#### asPlanned, and what it does not mean
+
+`asPlanned: false` marks a set that diverged from the prescription. Fields
+named in the plan's `athleteFills` are excluded from that comparison,
+because the plan holds `null` there on purpose — a cardio set prescribing
+distance and pace with `"athleteFills": "duration"` comes back
+`asPlanned: true` when performed as written, however fast it was rowed.
+
+An unanswered `rpe` or `athleteSummary` is `null`, which means the athlete
+did not answer. It does not mean zero, and it does not mean agreement.
+
 ### 3. What they should do next
 
 Write `wods/<athlete>/<date>.json`, conforming to `wod.schema.json`.

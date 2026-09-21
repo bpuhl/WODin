@@ -46,7 +46,12 @@ jobs:
       # and it means a broken build fails here rather than after an image
       # push and a Terraform apply.
       - name: Run tests
-        run: python3 -m unittest discover -s functions/server -p "test_*.py"
+        run: |
+          python3 -m unittest discover -s functions/server -p "test_*.py"
+          # The app has JS logic that decides stored data, not just
+          # presentation -- asPlanned ends up in every result an agent
+          # reads, so it is tested like anything else.
+          node --test test/
 
       - name: Preflight — required secrets
         run: |
