@@ -66,7 +66,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-from urllib.parse import urlsplit, parse_qs, quote
+from urllib.parse import urlsplit, parse_qs, quote, urlencode
 
 import oci
 from fdk import response
@@ -595,10 +595,17 @@ def handler(ctx, data: io.BytesIO = None):
         cookie = ("%s=%s; Path=/; Max-Age=%d; HttpOnly; Secure; SameSite=Lax"
                   % (_COOKIE_NAME, token, int(days * 86400)))
         log.info("wodin-server: enrolled '%s'", athlete.get("id"))
-        # Redirect to the same path without the key, so it stops appearing
-        # in history, referrers and any link the athlete shares.
-        return _redirect(ctx, path if path.startswith("/") else "/" + path,
-                         cookie=cookie)
+        # Strip the key, keep everything else. Redirecting to the bare path
+        # discarded the rest of the query, so a single
+        # "?key=...&d=2026-09-21" link enrolled the athlete and then landed
+        # them on the library instead of the workout they were sent -- and
+        # the whole point of the link is that it is one link.
+        remaining = [(k, v) for k, vs in parse_qs(query, keep_blank_values=True).items()
+                     if k != "key" for v in vs]
+        target = path if path.startswith("/") else "/" + path
+        if remaining:
+            target += "?" + urlencode(remaining)
+        return _redirect(ctx, target, cookie=cookie)
 
     athlete_id = _verify_session(secret, _cookie(ctx, _COOKIE_NAME))
     if not athlete_id:

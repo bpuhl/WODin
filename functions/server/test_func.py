@@ -449,6 +449,23 @@ class TestHandlerEndToEnd(unittest.TestCase):
                                     cookie=self.cookie_from(enrol)))
         self.assertEqual(res.status_code, 200)
 
+    def test_one_link_can_enrol_and_open_a_workout(self):
+        # "?key=...&d=<date>" is the link an athlete is actually sent.
+        # Redirecting to the bare path dropped the d and landed them on the
+        # library instead of their workout.
+        res = func.handler(self.Ctx("/?key=%s&d=2026-09-20" % self.key))
+        self.assertEqual(res.status_code, 303)
+        self.assertEqual(res.headers["Location"], "/?d=2026-09-20")
+        self.assertNotIn("key=", res.headers["Location"],
+                         "the key must not survive the redirect")
+
+    def test_multiple_params_survive_enrolment(self):
+        res = func.handler(self.Ctx("/?d=2026-09-20&key=%s&x=1" % self.key))
+        loc = res.headers["Location"]
+        self.assertIn("d=2026-09-20", loc)
+        self.assertIn("x=1", loc)
+        self.assertNotIn("key=", loc)
+
     def test_enrolling_on_a_gated_path_redirects_back_to_it(self):
         res = func.handler(self.Ctx("/wods/2026-09-20.json?key=" + self.key))
         self.assertEqual(res.status_code, 303)
