@@ -41,6 +41,21 @@ test('every *Html() helper is actually called somewhere', () => {
   }
 });
 
+test('the home handler clears the query, not just the hash', () => {
+  // It preventDefault()s the anchor, so whatever it does instead IS the
+  // navigation. Clearing only location.hash was correct when routing was
+  // hash-only; ?d= and ?h= made it a no-op, and the link looked broken
+  // while appearing to respond.
+  const src = readFileSync(path.join(SRC, 'main.js'), 'utf8');
+  const m = src.match(/closest\('#home'\)\)\s*\{([\s\S]*?)\n    \}/);
+  assert.ok(m, 'home handler not found');
+  const body = m[1];
+  assert.ok(/preventDefault/.test(body), 'handler should intercept the click');
+  assert.ok(/location\.search|pushState|location\.assign|location\.href/.test(body),
+    'handler intercepts the click but never clears the query — on a ?d= or ' +
+    '?h= URL that re-renders the same page and the link does nothing');
+});
+
 test('every render function is reachable from somewhere', () => {
   const all = sources();
   const combined = all.map(([, s]) => s).join('\n');
