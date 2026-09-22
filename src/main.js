@@ -295,7 +295,7 @@ function renderWorkout() {
   const head = `
     <header>
       <div class="eyebrow">
-        <a href="?" id="home">← All workouts</a>
+        <a href="?" id="home">← WODin</a>
         <span class="eb-right">
           ${dateWithNavHtml(nice)}
           <a class="eb-link" href="?h=1">History</a>
@@ -695,7 +695,13 @@ function bind() {
     if (e.target.id === 'log') return logWorkout();
     if (e.target.closest('#home')) {
       e.preventDefault();
-      location.hash = '';
+      // Home is the library, which means clearing the QUERY as well as the
+      // hash. This cleared only the hash, which was right when routing was
+      // hash-only -- ?d= and ?h= came later, so on those URLs it cleared
+      // nothing, re-rendered the same page, and the link looked dead.
+      if (location.search || location.hash) {
+        history.pushState({}, '', location.pathname.replace(/[^/]*$/, ''));
+      }
       route();
     }
   });
