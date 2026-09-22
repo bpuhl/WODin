@@ -796,6 +796,16 @@ function buildResult() {
   };
 }
 
+/* The device's own date, not UTC. A workout published for the 22nd should
+ * open on the 22nd where the athlete is standing; a UTC day boundary would
+ * hand an early-morning or late-evening session the wrong day. The agent
+ * names the file, so the two only have to agree on the calendar date. */
+function todayLocal() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 /* ── submit sheet ────────────────────────────────────────────── */
 
 /* Two delivery modes, because endpoints differ in what they can be made to do.
@@ -980,6 +990,19 @@ async function resolveWod() {
       if (res.ok) return await res.json();
     } catch { /* offline or absent — fall through to the library */ }
   }
+
+  // Nothing asked for: try today's. The server resolves wods/<date>.json
+  // through the session's own athlete, so this is how a signed-in athlete
+  // opening wod.imav8n.com lands on their workout without knowing the date.
+  //
+  // No need to ask whether we are signed in: the fetch IS the test. A 401
+  // or a 404 falls through to the library exactly as before, so nobody
+  // sees an error for not having one.
+  try {
+    const res = await fetch(`wods/${todayLocal()}.json`);
+    if (res.ok) return await res.json();
+  } catch { /* offline with nothing cached — the library is the fallback */ }
+
   return null;
 }
 

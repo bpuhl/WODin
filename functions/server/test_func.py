@@ -166,13 +166,21 @@ class TestTextStillWorks(unittest.TestCase):
             self.assertIn(expected, res.headers["Content-Type"], name)
 
 
-def make_athlete(key, athlete_id="brian", disabled=False):
+def make_pin(pin):
+    salt = os.urandom(16)
+    return salt.hex(), hashlib.pbkdf2_hmac("sha256", pin.encode(), salt, 1000).hex()
+
+
+def make_athlete(key, athlete_id="brian", disabled=False, pin=None):
     salt = os.urandom(16)
     digest = hashlib.pbkdf2_hmac("sha256", key.encode(), salt, 1000).hex()
     a = {"id": athlete_id, "name": athlete_id.title(), "salt": salt.hex(),
          "iterations": 1000, "hash": digest}
     if disabled:
         a["disabled"] = True
+    if pin is not None:
+        a["pin_salt"], a["pin_hash"] = make_pin(pin)
+        a["pin_iterations"] = 1000
     return a
 
 
@@ -410,7 +418,7 @@ class TestHandlerEndToEnd(unittest.TestCase):
 
     def setUp(self):
         self.key = "test-device-key"
-        athlete = make_athlete(self.key, "brian")
+        athlete = make_athlete(self.key, "brian", pin="987654")
         auth = {"session_secret": "s" * 64, "session_days": 365,
                 "athletes": [athlete]}
         self.bucket = FakeBucket({
@@ -500,6 +508,43 @@ class TestHandlerEndToEnd(unittest.TestCase):
         hist = func.handler(self.Ctx("/api/history", cookie=c))
         self.assertEqual(json.loads(hist.response_data)["sessions"][0]["rpe"], 8)
 
+    def test_login_page_is_public(self):
+        self.bucket.objects["login.html"] = b"<form>"
+        self.assertEqual(func.handler(self.Ctx("/login")).status_code, 200)
+
+    def test_athlete_path_serves_the_login_page(self):
+        self.bucket.objects["login.html"] = b"<form>"
+        res = func.handler(self.Ctx("/brian"))
+        self.assertEqual(res.status_code, 200)
+
+    def test_signing_in_with_a_pin_yields_a_working_session(self):
+        self.bucket.objects["login.html"] = b"<form>"
+        body = b"athlete=brian&pin=987654&next=%2F"
+        res = func.handler(self.Ctx("/login", method="POST"), io.BytesIO(body))
+        self.assertEqual(res.status_code, 303)
+        self.assertIn("wodin_session=", res.headers.get("Set-Cookie", ""))
+        self.assertIn("HttpOnly", res.headers["Set-Cookie"])
+        # and that session opens a gated path
+        got = func.handler(self.Ctx("/wods/2026-09-20.json",
+                                    cookie=self.cookie_from(res)))
+        self.assertEqual(got.status_code, 200)
+
+    def test_a_wrong_pin_sets_no_session(self):
+        res = func.handler(self.Ctx("/login", method="POST"),
+                           io.BytesIO(b"athlete=brian&pin=000000"))
+        self.assertEqual(res.status_code, 303)
+        self.assertNotIn("Set-Cookie", res.headers)
+        self.assertIn("e=1", res.headers["Location"])
+
+    def test_failed_login_does_not_reveal_whether_the_athlete_exists(self):
+        a = func.handler(self.Ctx("/login", method="POST"),
+                         io.BytesIO(b"athlete=brian&pin=000000"))
+        b = func.handler(self.Ctx("/login", method="POST"),
+                         io.BytesIO(b"athlete=nobody&pin=000000"))
+        self.assertEqual(a.status_code, b.status_code)
+        self.assertEqual(a.headers["Location"].split("&a=")[0],
+                         b.headers["Location"].split("&a=")[0])
+
     def test_api_requires_a_session(self):
         res = func.handler(self.Ctx("/api/history"))
         self.assertEqual(res.status_code, 401)
@@ -566,6 +611,50 @@ class TestHandlerEndToEnd(unittest.TestCase):
                          "wods/brian/2026-09-20.json")
         self.assertIsNone(func._athlete_workout_object("brian", "/wods/"))
         self.assertIsNone(func._athlete_workout_object("brian", "/wods/../x"))
+
+
+class TestTypeableLogin(unittest.TestCase):
+    """Phase 6: athlete + PIN, so a device with nothing pasted onto it can
+    get in."""
+
+    def setUp(self):
+        self.doc = {"session_secret": "s" * 64, "session_days": 365,
+                    "athletes": [make_athlete("k1", "brian", pin="123456"),
+                                 make_athlete("k2", "sam", pin="654321"),
+                                 make_athlete("k3", "old", pin="111111", disabled=True),
+                                 make_athlete("k4", "nopin")]}
+
+    def test_correct_pin_resolves_to_that_athlete(self):
+        self.assertEqual(func._verify_pin(self.doc, "brian", "123456")["id"], "brian")
+
+    def test_a_pin_only_works_for_its_own_athlete(self):
+        # The whole reason a 6-digit secret is defensible: it is checked
+        # against ONE named athlete, not swept across the registry.
+        self.assertIsNone(func._verify_pin(self.doc, "brian", "654321"))
+        self.assertEqual(func._verify_pin(self.doc, "sam", "654321")["id"], "sam")
+
+    def test_wrong_unknown_and_malformed_are_rejected(self):
+        for who, pin in [("brian", "123457"), ("brian", ""), ("brian", "abc123"),
+                         ("ghost", "123456"), ("", "123456"), ("brian", None)]:
+            self.assertIsNone(func._verify_pin(self.doc, who, pin), (who, pin))
+
+    def test_disabled_athlete_cannot_sign_in(self):
+        self.assertIsNone(func._verify_pin(self.doc, "old", "111111"))
+
+    def test_an_athlete_with_no_pin_set_cannot_sign_in(self):
+        self.assertIsNone(func._verify_pin(self.doc, "nopin", "123456"))
+
+    def test_athlete_paths_that_should_show_a_login_page(self):
+        for p in ("/brian", "/sam/", "/someone-else"):
+            self.assertIsNotNone(func._looks_like_athlete_path(p), p)
+
+    def test_paths_that_must_not_be_mistaken_for_an_athlete(self):
+        # Reserved routes, nested paths and anything with an extension --
+        # otherwise a real asset would be answered with a login page.
+        for p in ("/api", "/wods", "/login", "/src", "/schema",
+                  "/src/main.js", "/wods/2026-09-22.json", "/sw.js",
+                  "/Brian", "/", "/a/b"):
+            self.assertIsNone(func._looks_like_athlete_path(p), p)
 
 
 class TestCaching(unittest.TestCase):
