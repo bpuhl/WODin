@@ -1,131 +1,91 @@
 # WODin
 
-**Hand a structured workout to a human. Get back what they actually did.**
+**An agent writes your workout. You log it on your phone at the gym. The agent reads back what you actually did.**
 
-An agent writes a workout as JSON. WODin turns it into a page the athlete opens on their
-phone at the gym — offline, installable, prefilled with the plan. They log what really
-happened, tap once, and the agent gets it back as structured data.
-
-🏋️ **[beachmonkey-ai.github.io/WODin](https://beachmonkey-ai.github.io/WODin/)**
+Live at **[wod.imav8n.com](https://wod.imav8n.com)**.
 
 ```
-  agent writes                 athlete uses                  agent reads
-  ────────────                 ────────────                  ───────────
-   wod.json    ─── link ───>   the page      ─── submit ───>   result
-  (the plan)                (phone, offline)                  (the log)
+  agent                          athlete                        agent
+  ─────                          ───────                        ─────
+  reads results/<you>/           opens wod.imav8n.com           reads the result
+  writes wods/<you>/<date>  ──>  signs in, logs the set  ──>    and prescribes
+        (Object Storage)          (offline-capable PWA)          the next one
 ```
 
-No server. No account. No API key. The workout travels in the URL fragment, so it never
-touches a server at all — and the page keeps working with no signal, which matters because
-gyms don't have any.
+Each athlete gets their own workout, because the agent builds it from *their*
+history — where their strengths are, and how that lines up with their goals.
 
-## Why it exists
+## Getting in
 
-This started as Google Apps Script talking to a Sheet. That worked, but it welded the idea
-to one runtime: an agent that isn't Apps Script couldn't generate a page, and an agent that
-wasn't the author's couldn't read a result. WODin is the same idea with the protocol pulled
-out of the plumbing, so OpenClaw, GrokBot, Claude or anything else can drive it.
+Type the address and sign in:
 
-## Use it in 30 seconds
-
-```bash
-git clone https://github.com/BeachMonkey-AI/WODin && cd WODin
-node cli/wodin.mjs link examples/routine-2-back-biceps.json
-# → https://beachmonkey-ai.github.io/WODin/#w=zZbNbuM2EMdf...
+```
+wod.imav8n.com/brian          then a 6-digit PIN
 ```
 
-Send that link. That's the whole integration.
+That works on any device, which is the point: a workout should open on
+whatever you are holding, without transferring a URL from somewhere else.
 
-## Running on OCI
+A long device-key link (`?key=…`) also still works and skips the PIN. Two
+doors, one session — signing in lasts a year, so the app opens at a gym
+with no signal.
 
-This fork is deployed at **https://wod.imav8n.com**, with device-key access,
-per-athlete workouts, and stored history. [`DEPLOYMENT.md`](DEPLOYMENT.md) is
-the contract for that: where an agent publishes, how it reads history, and
-what the site serves to whom.
-
-`AGENT.md` below remains upstream's protocol and is unchanged — the two JSON
-documents and the link. `DEPLOYMENT.md` is the other half.
-
-## For agents
-
-**[`AGENT.md`](AGENT.md) is the protocol** — one file that teaches any agent the whole
-thing. Point your agent at it.
-
-The two documents it describes:
+## What's here
 
 | | |
 |---|---|
-| [`schema/wod.schema.json`](schema/wod.schema.json) | the plan — what you prescribe |
-| [`schema/result.schema.json`](schema/result.schema.json) | the result — what they did |
+| [`DEPLOYMENT.md`](DEPLOYMENT.md) | **the contract** — where the agent publishes, how it reads history, what the site serves to whom |
+| `schema/` | the two JSON documents: the plan, and the result |
+| `functions/server/` | the OCI Function serving the site and the API |
+| `infra/` | Terraform: buckets, gateway, function, logging |
+| `scripts/` | athlete and key management, IAM bootstrap, deploy helpers |
+| `src/`, `styles/`, `public/` | the app itself — vanilla JS, no framework, no bundler |
+| `cli/wodin.mjs` | `link`, `render`, `serve`, `parse`, `validate` |
 
-Structure is `sections → exercises → sets`. A **set** is one prescription row; an
-**exercise** is the movement containing them. Five field layouts cover what a session
-actually needs:
+## Running it
 
-| `kind` | Renders as |
-|---|---|
-| `weight_reps` | `95 lb × 5 reps` |
-| `reps` | `10 reps` |
-| `time` | `0:20 mm:ss` |
-| `cardio` | `2:00 /500m` · `500 m` · `1:58 mm:ss` |
-| `carry` | `50 lb × 1 reps` · `100 ft` |
-
-## CLI
-
-Zero dependencies — node's own `zlib` and `http`.
-
-```bash
-node cli/wodin.mjs link     wod.json [--base URL]   # shareable #w= URL — the phone path
-node cli/wodin.mjs render   wod.json [-o out.html]  # self-contained single file
-node cli/wodin.mjs serve    [wod.json] [--port N]   # localhost + LAN; POST /submit → logs/
-node cli/wodin.mjs parse    <file|->               # digest or JSON → canonical result JSON
-node cli/wodin.mjs validate wod.json ...           # structural check
+```sh
+node scripts/build.mjs      # → dist/
+python3 -m unittest discover -s functions/server -p "test_*.py"
+node --test test/
 ```
 
-Run it from a clone. There is no published npm package, and `npx wodin` would fetch an
-unrelated package of that name owned by someone else.
+Push to `main` and GitHub Actions builds, applies Terraform, syncs the
+site, warms the function and verifies every asset byte-for-byte.
 
-`serve` is the tightest loop when the agent and the athlete share a machine or a wifi
-network: a real Submit button, writing `logs/<workoutId>.json` where the agent can watch.
+Issuing access:
 
-## Three design decisions worth knowing
-
-**The plan prefills; the athlete overwrites.** Loads and reps arrive filled in, so logging a
-session done as prescribed costs zero taps. Subjective fields — session RPE, notes — start
-*blank*, with the prescription shown only as a ghost (`Rx 7`). A prefilled 7 is
-indistinguishable from an answered 7, and that distinction is the point.
-
-**The result carries every set, not just the deviations.** Sets done as prescribed come back
-with `asPlanned: true`. A sparse diff can't tell "did it exactly right" from "never logged
-it", so `log` is complete and absence always means skipped.
-
-**One note per exercise, never per set.** The athlete gets one place to say how a movement
-went. Per-row notes fragment the same thought across five boxes.
-
-## Running it locally
-
-```bash
-npm install
-npm run gen-icons        # public/icon.svg → PNG set
-npm run build            # → dist/
-npm run serve            # or: node cli/wodin.mjs serve examples/minimal.json
+```sh
+python3 scripts/manage-athletes.py add --id brian --name "Brian"
+python3 scripts/manage-athletes.py set-pin brian
+python3 scripts/manage-athletes.py set-role doc coach --athletes brian sam
 ```
 
-Deploys to GitHub Pages from `gh-pages`. `main` publishes to `/`; each open PR gets
-`/preview/pr-<N>/`. Every path in the app is relative, so the same build output is correct
-at either location with no base-path parameter.
+## Three decisions worth knowing
 
-## Layout
+**The athlete is never in the URL.** `/wods/2026-09-22.json` resolves through
+the signed-in session, so two people open the identical address and each get
+their own workout. Isolation is structural — there is nothing in the URL to
+tamper with.
 
-```
-AGENT.md              the protocol, written for an agent to read
-schema/               wod + result JSON Schemas
-examples/             a real workout, two contrasting athletes, the smallest valid plan
-index.html            app shell
-src/                  main.js, app.css, icons.js
-styles/               design tokens, self-hosted font faces
-public/               manifest, service worker, icon source, font files
-cli/wodin.mjs         link | render | serve | parse | validate
-design/prototype.html the layout pass this app was built from
-scripts/              build, icon generation, font fetch
-```
+**Nothing private is ever served as an object.** The key registry, the roster
+and stored results are reachable only through the API, which scopes every
+request to the caller. A signed-in athlete cannot fetch another's session by
+guessing a path.
+
+**Auth is a signed cookie, not a token exchange.** It lasts a year and needs
+no network to keep working, because the one place this app has to work is a
+gym with no signal.
+
+## Credit
+
+Forked from [BeachMonkey-AI/WODin](https://github.com/BeachMonkey-AI/WODin),
+whose protocol — a workout as JSON, a result as JSON, and a link between
+them — is the foundation this is built on. That project is deliberately
+serverless: the workout travels in the URL fragment and touches no server.
+This fork took the opposite turn, adding a backend so workouts can be
+published per athlete and history kept, which is why the two have diverged
+rather than one tracking the other.
+
+Bundled typefaces (Barlow, Barlow Condensed, JetBrains Mono) are under the
+SIL Open Font License 1.1 — see [`public/fonts/OFL.txt`](public/fonts/OFL.txt).

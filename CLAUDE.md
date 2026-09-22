@@ -5,7 +5,12 @@
   read. The protocol — `AGENT.md` plus the two schemas — is the actual product; the PWA is
   the reference implementation and the CLI is convenience. Replaces a Google Apps Script +
   Sheets original that only Apps Script could drive.
-- **Live:** https://beachmonkey-ai.github.io/WODin/
+- **Live:** https://wod.imav8n.com (OCI: private buckets, a Function behind an API Gateway)
+- **This is a fork that diverged.** Upstream is serverless by design — the workout travels
+  in the URL fragment and touches no server. This one added a backend: device-key and PIN
+  sign-in, per-athlete workouts, stored history, roles. No updates are pushed or pulled.
+  `DEPLOYMENT.md` is the contract; `AGENT.md` is upstream's protocol, still correct about
+  the schemas and wrong about delivery.
 - **Model:** vanilla (no bundler, no framework, no runtime deps; `sharp` is dev-only for icons)
 - **Token deviations from app-template:** `--accent` is `#cdf24a` (lime), ground is `#0d1011`
   with a faint green bias. Dark-committed on purpose — no light theme, no

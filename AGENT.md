@@ -1,5 +1,13 @@
 # WODin — agent protocol
 
+> **Read [`DEPLOYMENT.md`](DEPLOYMENT.md) first if you are writing workouts for
+> wod.imav8n.com.** This file is the upstream protocol, kept because the
+> schemas, the `kind` taxonomy and the movement-naming rules below are still
+> exactly right. The delivery model it describes is not: this deployment does
+> not pass workouts in links. An agent publishes to Object Storage per athlete
+> and reads history back from it, which `DEPLOYMENT.md` specifies. Where the
+> two disagree about how a workout reaches an athlete, `DEPLOYMENT.md` wins.
+
 You are an agent that coaches a human athlete. WODin is how you hand them a workout and get
 back what they actually did.
 
@@ -146,7 +154,7 @@ The search is the fallback, not the feature — if you have a better reference, 
 **The link carries the workout.** Compress the plan and put it in the URL fragment:
 
 ```
-https://beachmonkey-ai.github.io/WODin/#w=<deflate-raw, then base64url>
+https://wod.imav8n.com/#w=<deflate-raw, then base64url>
 ```
 
 ```bash
@@ -160,7 +168,7 @@ Or by hand in Node:
 ```js
 import { deflateRawSync } from 'node:zlib';
 const frag = deflateRawSync(Buffer.from(JSON.stringify(wod))).toString('base64url');
-const url = `https://beachmonkey-ai.github.io/WODin/#w=${frag}`;
+const url = `https://wod.imav8n.com/#w=${frag}`;
 ```
 
 No compression available? Use `#wj=` with plain base64url JSON instead. Both are accepted.
@@ -317,7 +325,7 @@ The page is served from one origin and your endpoint is on another, so a normal 
 triggers an `OPTIONS` preflight. Your endpoint must answer it:
 
 ```
-Access-Control-Allow-Origin: https://beachmonkey-ai.github.io
+Access-Control-Allow-Origin: https://wod.imav8n.com
 Access-Control-Allow-Methods: POST, OPTIONS
 Access-Control-Allow-Headers: Content-Type
 ```
