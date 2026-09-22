@@ -288,6 +288,7 @@ function renderWorkout() {
       <div class="eyebrow">
         <a href="#" id="home">← WODin</a>
         <span class="eb-right">
+          ${dayNavHtml()}
           <span>${esc(nice)}</span>
           <button class="btn-share" id="shareWod" type="button"
                   aria-label="Share this workout without your submit link">${ICON.share}<span>Share</span></button>
@@ -1077,7 +1078,12 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') $('scrim').h
 async function resolveWod() {
   // Kick the day list off without waiting for it: the workout should
   // paint immediately, and navigation can appear a moment later.
-  loadDays().then(() => { if (VIEW_DATE && WOD) renderWorkout(); });
+  loadDays().then(() => {
+    // Whichever of the two fetches finishes second is the one that can
+    // draw the navigation, so both paths re-render. Without this the
+    // arrows appear or not depending on which response won the race.
+    if (VIEW_DATE && WOD) renderWorkout();
+  });
 
   if (location.hash) {
     try {
