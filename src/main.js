@@ -479,6 +479,9 @@ function renderLibrary() {
        </div>`
     : null;
 
+  const historyLink = SIGNED_IN
+    ? `<p class="lib-h-sub"><a href="?h=1">View your history →</a></p>` : '';
+
   const empty = signedInEmpty || (installed
     ? `<div class="lib-empty">
          <p><b>Nothing here yet.</b> Workout links open in your browser, not in this
@@ -500,6 +503,7 @@ function renderLibrary() {
       <h1>Your workouts</h1>
     </header>
     ${list.length ? `<div class="lib">${items}</div>` : empty}
+    ${historyLink}
     <div class="paste">
       <button class="pill" type="button" id="paste">Paste a workout link</button>
       <div class="paste-manual" id="pasteManual" hidden>
@@ -1112,6 +1116,12 @@ async function resolveWod() {
 async function route() {
   clearInterval(tick);
   pendingRemove = null;
+
+  // History is server-side and read-only, so it short-circuits the workout
+  // resolution entirely -- there is no plan to load and nothing to log.
+  const h = new URLSearchParams(location.search).get('h');
+  if (h) { WOD = null; S = null; return renderHistory(h === '1' ? null : h); }
+
   const wod = await resolveWod();
 
   if (!wod) { WOD = null; S = null; renderLibrary(); return; }
@@ -1122,6 +1132,118 @@ async function route() {
   seedAdded();
   renderWorkout();
   runTick();
+}
+
+/* ── history ──────────────────────────────────────────────────
+ *
+ * Read from the server, not from this device. localStorage only knows the
+ * sessions logged on the phone in your hand; the point of history is that
+ * it follows the athlete, so a new device shows everything.
+ *
+ * Read-only by design. These are sessions already sent; re-opening one to
+ * edit it would mean deciding what a second submission of the same
+ * workoutId means, and the answer today is "it overwrites", which is right
+ * for a correction and wrong for a stray tap.
+ */
+async function renderHistory(workoutId) {
+  $('app').innerHTML = `<div class="lib-empty"><p>Loading…</p></div>`;
+
+  let payload = null;
+  let status = 0;
+  try {
+    const res = await fetch(workoutId ? `api/history/${encodeURIComponent(workoutId)}` : 'api/history');
+    status = res.status;
+    if (res.ok) payload = await res.json();
+  } catch { /* offline — handled below */ }
+
+  const back = `<div class="eyebrow"><a href="?" id="home">← WODin</a></div>`;
+
+  if (status === 401) {
+    $('app').innerHTML = `${back}<div class="lib-empty">
+      <p><b>Sign in to see your history.</b></p>
+      <p style="margin-bottom:0"><a href="/login">Sign in</a></p></div>`;
+    return;
+  }
+  if (!payload) {
+    // Distinguish "no signal" from "nothing there" -- the first is
+    // temporary and the second is not, and an athlete at a gym deserves to
+    // know which they are looking at.
+    $('app').innerHTML = `${back}<div class="lib-empty">
+      <p><b>${navigator.onLine ? "Couldn't load your history." : 'No signal.'}</b></p>
+      <p style="margin-bottom:0">${navigator.onLine
+        ? 'Try again in a moment.'
+        : 'History lives on the server, so it needs a connection. Your workout still works offline.'}</p>
+      </div>`;
+    return;
+  }
+
+  $('app').innerHTML = workoutId ? historyDetail(payload, back) : historyList(payload, back);
+}
+
+function historyList(payload, back) {
+  const sessions = payload.sessions || [];
+  if (!sessions.length) {
+    return `${back}<div class="lib-empty"><p><b>No sessions logged yet.</b></p>
+      <p style="margin-bottom:0">They appear here once you log a workout.</p></div>`;
+  }
+  const rows = sessions.map(x => {
+    const bits = [
+      x.duration ? esc(x.duration) : null,
+      x.rpe != null ? `RPE ${esc(String(x.rpe))}` : null,
+      `${x.sets || 0} set${x.sets === 1 ? '' : 's'}`,
+      x.skipped ? `${x.skipped} skipped` : null
+    ].filter(Boolean).join(' · ');
+    // Only worth saying when it was not the athlete themselves.
+    const by = x.submittedBy && x.submittedBy !== payload.athleteId
+      ? `<span class="badge dim">logged by ${esc(x.submittedBy)}</span>` : '';
+    return `<a class="lib-item" href="?h=${encodeURIComponent(x.workoutId)}">
+      <span class="col">
+        <span class="t">${esc(x.title || x.workoutId)}</span>
+        <span class="d">${esc(x.workoutId)} · ${bits}</span>
+      </span>${by}</a>`;
+  }).join('');
+  return `${back}<h2 class="lib-h">History</h2>${rows}`;
+}
+
+function historyDetail(r, back) {
+  const head = [
+    r.duration ? esc(r.duration) : null,
+    r.rpe != null ? `RPE ${esc(String(r.rpe))}` : null
+  ].filter(Boolean).join(' · ');
+
+  const entries = Object.entries(r.log || {});
+  const sets = entries.length
+    ? entries.map(([k, v]) => {
+        const parts = [];
+        if (v.load != null) parts.push(esc(String(v.load)));
+        if (v.reps != null) parts.push(`× ${esc(String(v.reps))}`);
+        if (v.distance != null) parts.push(`${esc(String(v.distance))} m`);
+        if (v.duration) parts.push(esc(v.duration));
+        if (v.pace) parts.push(`@ ${esc(v.pace)}`);
+        // asPlanned is only interesting when it is false -- flagging every
+        // compliant set would bury the ones that actually diverged.
+        const flag = v.asPlanned === false ? '<span class="badge dim">off plan</span>' : '';
+        return `<div class="lib-item"><span class="col">
+          <span class="t">${esc(k)}</span>
+          <span class="d">${parts.join(' ') || '—'}</span></span>${flag}</div>`;
+      }).join('')
+    : `<div class="lib-empty"><p style="margin:0">Nothing logged.</p></div>`;
+
+  const notes = Object.entries(r.notes || {}).map(([k, v]) =>
+    `<div class="lib-item"><span class="col"><span class="t">${esc(k)}</span>
+      <span class="d">${esc(v)}</span></span></div>`).join('');
+
+  const by = r.submittedBy && r.submittedBy !== r.athleteId
+    ? `<p class="d">Logged by ${esc(r.submittedBy)} on your behalf.</p>` : '';
+
+  return `${back}
+    <h2 class="lib-h">${esc(r.title || r.workoutId)}</h2>
+    <p class="d">${esc(r.workoutId)}${head ? ' · ' + head : ''}</p>
+    ${by}
+    ${r.athleteSummary ? `<div class="lib-empty"><p style="margin:0">${esc(r.athleteSummary)}</p></div>` : ''}
+    ${sets}
+    ${notes ? `<h2 class="lib-h">Notes</h2>${notes}` : ''}
+    ${(r.skipped || []).length ? `<p class="d">Skipped: ${esc((r.skipped || []).join(', '))}</p>` : ''}`;
 }
 
 /* ── sharing the workout onward ──────────────────────────────
