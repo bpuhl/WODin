@@ -17,6 +17,7 @@ Exit status is 0 only if every asset matches, so CI can gate on it.
 import hashlib
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -44,6 +45,17 @@ ASSETS = [
 # pointed at the public domain, every asset "failed" while the site was
 # perfectly healthy. Identify the script honestly instead.
 USER_AGENT = "wodin-verify-assets/1.0 (+https://github.com/bpuhl/WODin)"
+
+# The gateway rate-limits to 5 requests/second per client IP, which exists
+# so a 6-digit sign-in PIN cannot be brute-forced. This script fetches
+# every asset from one address as fast as it can, and promptly throttled
+# itself into a failed deploy: 429s reported as corrupted assets.
+#
+# The limit is the point, so the client paces itself rather than the
+# gateway being loosened. 4/s leaves headroom for anything else sharing
+# the address.
+REQUEST_INTERVAL = 0.25
+MAX_RETRIES = 4
 
 EXPECTED_TYPE = {"woff2": "font/woff2", "png": "image/png", "css": "text/css",
                  "js": "application/javascript", "webmanifest": "application/manifest+json"}
@@ -78,19 +90,37 @@ def main():
             want = fh.read()
         url = base + "/" + path
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        try:
-            with urllib.request.urlopen(req, timeout=60) as res:
-                got = res.read()
-                ctype = res.headers.get("Content-Type", "")
-        except urllib.error.HTTPError as exc:
+        got = ctype = None
+        last = None
+        for attempt in range(MAX_RETRIES):
+            time.sleep(REQUEST_INTERVAL)
+            try:
+                with urllib.request.urlopen(req, timeout=60) as res:
+                    got = res.read()
+                    ctype = res.headers.get("Content-Type", "")
+                break
+            except urllib.error.HTTPError as exc:
+                last = exc
+                if exc.code == 429:
+                    # Throttled rather than broken. Back off and retry --
+                    # reporting this as a corrupted asset, which is what it
+                    # used to do, sends the reader hunting for a bug that
+                    # is not there.
+                    time.sleep(1.0 * (2 ** attempt))
+                    continue
+                break
+            except Exception as exc:
+                last = exc
+                break
+
+        if got is None:
+            code = getattr(last, "code", None)
             hint = ""
-            if exc.code == 403:
+            if code == 403:
                 hint = "  (403 from a CDN, not the origin? check bot rules)"
-            print("  FAIL  %-38s HTTP %s%s" % (path, exc.code, hint))
-            failures += 1
-            continue
-        except Exception as exc:
-            print("  FAIL  %-38s %s" % (path, exc))
+            elif code == 429:
+                hint = "  (still rate-limited after %d tries)" % MAX_RETRIES
+            print("  FAIL  %-38s %s%s" % (path, "HTTP %s" % code if code else last, hint))
             failures += 1
             continue
 
