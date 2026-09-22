@@ -664,3 +664,43 @@ h2 {
 /* A history row is a record, not a control, so it reads flatter than a
    library item even though it reuses the class. */
 a.lib-item { text-decoration: none; color: inherit; }
+
+/* ── day navigation, revised after use ────────────────────────── */
+/* First pass sat the arrows beside the date and rendered them in the
+   body colour at 18px: functionally right, visually almost invisible on a
+   phone in a gym. Brighter, bolder, bigger, and now bracketing the date so
+   the relationship needs no label. */
+.daynav-group {
+  display: inline-flex; align-items: center; gap: 6px; vertical-align: middle;
+}
+
+.eb-date { font-variant-numeric: tabular-nums; }
+
+.daynav {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px;
+  border: 1px solid var(--accent); border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 24px; font-weight: 700; line-height: 1;
+  text-decoration: none;
+}
+
+.daynav:active { transform: translateY(1px); }
+
+/* The end of the road, kept in place so the date does not shift. */
+.daynav.is-off {
+  border-color: var(--line); background: none; color: var(--muted);
+  opacity: .35; font-weight: 400;
+}
+
+.eb-link {
+  color: var(--accent); text-decoration: none; font-weight: 600;
+  font-size: 13px; letter-spacing: .04em; text-transform: uppercase;
+}
+.eb-link:hover { text-decoration: underline; }
+
+/* A logged session reads as movements with their sets under them, the
+   same shape as the workout page. */
+.hrow { display: block; font-variant-numeric: tabular-nums; }
+.hnote { font-style: italic; opacity: .85; }

@@ -268,14 +268,23 @@ function field({ id, val, unit, ph, mode, cls }) {
  * pair of dead arrows would suggest otherwise. Each side is omitted rather
  * than disabled at the ends, so the control never advertises a workout
  * that is not there. */
-function dayNavHtml() {
-  if (!VIEW_DATE || !AVAILABLE_DAYS || AVAILABLE_DAYS.length === 0) return '';
+/* The date with a step either side of it, rather than a pair of arrows
+ * parked beside it. Bracketing makes the relationship obvious without a
+ * label: this date, one back, one forward. */
+function dateWithNavHtml(nice) {
+  const plain = `<span class="eb-date">${esc(nice)}</span>`;
+  if (!VIEW_DATE || !AVAILABLE_DAYS || AVAILABLE_DAYS.length === 0) return plain;
+
   const { prev, next } = neighbours(AVAILABLE_DAYS, VIEW_DATE);
-  if (!prev && !next) return '';
-  const btn = (d, label, aria) => d
-    ? `<a class="daynav" href="?d=${encodeURIComponent(d)}" aria-label="${aria}">${label}</a>`
+  if (!prev && !next) return plain;
+
+  const step = (d, label, aria) => d
+    ? `<a class="daynav" href="?d=${encodeURIComponent(d)}" aria-label="${aria}" title="${aria}">${label}</a>`
+    // A placeholder rather than nothing, so the date does not jump
+    // sideways as the athlete steps to either end.
     : `<span class="daynav is-off" aria-hidden="true">${label}</span>`;
-  return `<span class="daynav-group">${btn(prev, '‹', 'Previous workout')}${btn(next, '›', 'Next workout')}</span>`;
+
+  return `<span class="daynav-group">${step(prev, '‹', 'Previous workout')}${plain}${step(next, '›', 'Next workout')}</span>`;
 }
 
 function renderWorkout() {
@@ -286,10 +295,10 @@ function renderWorkout() {
   const head = `
     <header>
       <div class="eyebrow">
-        <a href="#" id="home">← WODin</a>
+        <a href="?" id="home">← All workouts</a>
         <span class="eb-right">
-          ${dayNavHtml()}
-          <span>${esc(nice)}</span>
+          ${dateWithNavHtml(nice)}
+          <a class="eb-link" href="?h=1">History</a>
           <button class="btn-share" id="shareWod" type="button"
                   aria-label="Share this workout without your submit link">${ICON.share}<span>Share</span></button>
         </span>
@@ -481,7 +490,7 @@ function renderLibrary() {
     : null;
 
   const historyLink = SIGNED_IN
-    ? `<p class="lib-h-sub"><a href="?h=1">View your history →</a></p>` : '';
+    ? `<p class="lib-h-sub"><a class="pill" href="?h=1">Your history →</a></p>` : '';
 
   const empty = signedInEmpty || (installed
     ? `<div class="lib-empty">
@@ -1130,7 +1139,16 @@ async function route() {
 
   const wod = await resolveWod();
 
-  if (!wod) { WOD = null; S = null; renderLibrary(); return; }
+  if (!wod) {
+    WOD = null; S = null;
+    // The library shows a History link only when signed in, and that is
+    // only known once loadDays() has answered. Rendering first meant the
+    // link never appeared: the flag flipped after the page was already
+    // drawn and nothing redrew it.
+    await loadDays();
+    renderLibrary();
+    return;
+  }
 
   WOD = normalise(wod);
   remember(WOD);
@@ -1162,6 +1180,19 @@ async function renderHistory(workoutId) {
     if (res.ok) payload = await res.json();
   } catch { /* offline — handled below */ }
 
+  // A result stores its log against ids -- ex1.s1 -- and carries no
+  // movement names, because the plan already has them. Reading it back on
+  // another day, the plan is the only thing that can say what ex1 was.
+  // Without this the detail page is a table of identifiers, which is what
+  // it was.
+  let plan = null;
+  if (workoutId && payload) {
+    try {
+      const r = await fetch(`wods/${encodeURIComponent(workoutId)}.json`);
+      if (r.ok) plan = normalise(await r.json());
+    } catch { /* the plan may be gone; fall back to ids below */ }
+  }
+
   const back = `<div class="eyebrow"><a href="?" id="home">← WODin</a></div>`;
 
   if (status === 401) {
@@ -1183,7 +1214,7 @@ async function renderHistory(workoutId) {
     return;
   }
 
-  $('app').innerHTML = workoutId ? historyDetail(payload, back) : historyList(payload, back);
+  $('app').innerHTML = workoutId ? historyDetail(payload, back, plan) : historyList(payload, back);
 }
 
 function historyList(payload, back) {
@@ -1211,45 +1242,75 @@ function historyList(payload, back) {
   return `${back}<h2 class="lib-h">History</h2>${rows}`;
 }
 
-function historyDetail(r, back) {
+function historyDetail(r, back, plan) {
   const head = [
     r.duration ? esc(r.duration) : null,
     r.rpe != null ? `RPE ${esc(String(r.rpe))}` : null
   ].filter(Boolean).join(' · ');
 
-  const entries = Object.entries(r.log || {});
-  const sets = entries.length
-    ? entries.map(([k, v]) => {
-        const parts = [];
-        if (v.load != null) parts.push(esc(String(v.load)));
-        if (v.reps != null) parts.push(`× ${esc(String(v.reps))}`);
-        if (v.distance != null) parts.push(`${esc(String(v.distance))} m`);
-        if (v.duration) parts.push(esc(v.duration));
-        if (v.pace) parts.push(`@ ${esc(v.pace)}`);
-        // asPlanned is only interesting when it is false -- flagging every
-        // compliant set would bury the ones that actually diverged.
-        const flag = v.asPlanned === false ? '<span class="badge dim">off plan</span>' : '';
-        return `<div class="lib-item"><span class="col">
-          <span class="t">${esc(k)}</span>
-          <span class="d">${parts.join(' ') || '—'}</span></span>${flag}</div>`;
-      }).join('')
-    : `<div class="lib-empty"><p style="margin:0">Nothing logged.</p></div>`;
+  /* id -> { movement, section }, so a logged set can be shown as the
+   * movement it was rather than the key it is stored under. */
+  const names = {};
+  (plan ? plan.sections || [] : []).forEach(sec => {
+    (sec.exercises || []).forEach(ex => {
+      names[ex.id] = { movement: ex.movement || ex.id, section: sec.name || '' };
+    });
+  });
 
-  const notes = Object.entries(r.notes || {}).map(([k, v]) =>
-    `<div class="lib-item"><span class="col"><span class="t">${esc(k)}</span>
-      <span class="d">${esc(v)}</span></span></div>`).join('');
+  /* Group the flat log back into exercises. A session reads as movements
+   * with their sets under them -- the same shape as the workout page --
+   * not as one row per set. */
+  const byExercise = new Map();
+  for (const [key, v] of Object.entries(r.log || {})) {
+    const exId = key.split('.')[0];
+    if (!byExercise.has(exId)) byExercise.set(exId, []);
+    byExercise.get(exId).push([key, v]);
+  }
+
+  const fmt = v => {
+    const bits = [];
+    if (v.load === 'BW') bits.push('BW');
+    else if (v.load != null) bits.push(`${esc(String(v.load))}`);
+    if (v.reps != null) bits.push(`× ${esc(String(v.reps))}`);
+    if (v.distance != null) bits.push(`${esc(String(v.distance))} m`);
+    if (v.duration) bits.push(esc(v.duration));
+    if (v.pace) bits.push(`@ ${esc(v.pace)}/500m`);
+    return bits.join(' ') || '—';
+  };
+
+  const blocks = [...byExercise.entries()].map(([exId, sets]) => {
+    const meta = names[exId];
+    const title = meta ? esc(meta.movement) : esc(exId);
+    // Only say "off plan" where it is true; flagging every compliant set
+    // would bury the ones that actually diverged.
+    const rows = sets.map(([, v]) =>
+      `<span class="hrow">${fmt(v)}${v.asPlanned === false
+        ? ' <span class="badge dim">off plan</span>' : ''}</span>`).join('');
+    const note = (r.notes || {})[exId];
+    return `<div class="lib-item"><span class="col">
+        <span class="t">${title}${meta && meta.section ? ` <span class="d">· ${esc(meta.section)}</span>` : ''}</span>
+        <span class="d">${rows}</span>
+        ${note ? `<span class="d hnote">${esc(note)}</span>` : ''}
+      </span></div>`;
+  }).join('');
+
+  const skipped = (r.skipped || []).map(id =>
+    names[id] ? esc(names[id].movement) : esc(id)).join(', ');
 
   const by = r.submittedBy && r.submittedBy !== r.athleteId
     ? `<p class="d">Logged by ${esc(r.submittedBy)} on your behalf.</p>` : '';
 
+  const stale = !plan
+    ? `<p class="d">The original plan is no longer published, so movements
+       are shown by id.</p>` : '';
+
   return `${back}
     <h2 class="lib-h">${esc(r.title || r.workoutId)}</h2>
     <p class="d">${esc(r.workoutId)}${head ? ' · ' + head : ''}</p>
-    ${by}
+    ${by}${stale}
     ${r.athleteSummary ? `<div class="lib-empty"><p style="margin:0">${esc(r.athleteSummary)}</p></div>` : ''}
-    ${sets}
-    ${notes ? `<h2 class="lib-h">Notes</h2>${notes}` : ''}
-    ${(r.skipped || []).length ? `<p class="d">Skipped: ${esc((r.skipped || []).join(', '))}</p>` : ''}`;
+    ${blocks || `<div class="lib-empty"><p style="margin:0">Nothing logged.</p></div>`}
+    ${skipped ? `<p class="d">Skipped: ${skipped}</p>` : ''}`;
 }
 
 /* ── sharing the workout onward ──────────────────────────────
