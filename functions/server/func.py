@@ -300,6 +300,38 @@ def _verify_key(doc, key):
     return match
 
 
+def _find_athlete(doc, athlete_id):
+    for a in doc.get("athletes", []):
+        if a.get("id") == athlete_id:
+            return a
+    return None
+
+
+def _may_act_for(doc, session_athlete_id, target_id):
+    """Can this session read or write for `target_id`?
+
+    Always yes for yourself. A coach may additionally act for the athletes
+    named on their own record -- assignment lives on the coach, so there is
+    one place to look to answer this and one place to edit when an athlete
+    is added.
+
+    Returns the target id when permitted, else None. Callers pass the
+    result straight into a bucket prefix, so a None must be refused rather
+    than defaulted -- defaulting to the session's own athlete would quietly
+    write one person's session into another's history.
+    """
+    if not target_id or target_id == session_athlete_id:
+        return session_athlete_id
+    me = _find_athlete(doc, session_athlete_id)
+    if not me or me.get("disabled"):
+        return None
+    if me.get("role") == "admin":
+        return target_id if _find_athlete(doc, target_id) else None
+    if me.get("role") == "coach" and target_id in (me.get("athletes") or []):
+        return target_id if _find_athlete(doc, target_id) else None
+    return None
+
+
 def _verify_pin(doc, athlete_id, pin):
     """Return the athlete if this id and PIN match, else None.
 
@@ -474,10 +506,12 @@ def _summarise(result, submitted_at):
         "sets": len(log_entries) if isinstance(log_entries, dict) else 0,
         "skipped": len(result.get("skipped") or []),
         "submittedAt": submitted_at,
+        "submittedBy": result.get("submittedBy"),
     }
 
 
-def _handle_log(ctx, data, os_client, namespace, data_bucket, athlete_id):
+def _handle_log(ctx, data, os_client, namespace, data_bucket, athlete_id,
+                submitted_by=None):
     raw = b""
     if data is not None:
         try:
@@ -507,6 +541,11 @@ def _handle_log(ctx, data, os_client, namespace, data_bucket, athlete_id):
     # logging a session at the gym may have any clock at all.
     result["receivedAt"] = submitted_at
     result["athleteId"] = athlete_id
+    # Who it is FOR and who actually sent it are different questions once a
+    # coach can log on someone's behalf. Without both, a number a coach
+    # mistyped is indistinguishable from one the athlete lifted -- and the
+    # agent reads this history to decide what to prescribe next.
+    result["submittedBy"] = submitted_by or athlete_id
 
     base = _RESULTS_PREFIX + athlete_id + "/"
     _put_json_object(os_client, namespace, data_bucket, base + workout_id + ".json", result)
@@ -617,21 +656,31 @@ def _handle_login(ctx, data, doc, os_client, namespace, bucket):
     return _redirect(ctx, next_path, cookie=_session_cookie(doc, secret, athlete))
 
 
-def _handle_api(ctx, data, method, path, os_client, namespace, data_bucket, athlete_id):
+def _handle_api(ctx, data, method, path, os_client, namespace, data_bucket,
+                athlete_id, doc=None, query=""):
     route = path[len("/api/"):].strip("/")
+
+    # ?athlete=<id> lets a coach act for one of theirs. Absent, everything
+    # resolves to the caller, exactly as before roles existed.
+    requested = (parse_qs(query).get("athlete", [""])[0] or "").strip().lower()
+    subject = _may_act_for(doc or {}, athlete_id, requested) if requested else athlete_id
+    if subject is None:
+        # Same answer whether the athlete does not exist or is simply not
+        # theirs to see, so the parameter cannot be used to enumerate.
+        return _json_response(ctx, {"error": "not found"}, 404)
     if route == "log":
         if method != "POST":
             return _json_response(ctx, {"error": "POST required"}, 405)
-        return _handle_log(ctx, data, os_client, namespace, data_bucket, athlete_id)
+        return _handle_log(ctx, data, os_client, namespace, data_bucket, subject, athlete_id)
     if route == "days":
         if method not in ("GET", "HEAD"):
             return _json_response(ctx, {"error": "GET required"}, 405)
-        return _handle_days(ctx, os_client, namespace, data_bucket, athlete_id)
+        return _handle_days(ctx, os_client, namespace, data_bucket, subject)
     if route == "history" or route.startswith("history/"):
         if method not in ("GET", "HEAD"):
             return _json_response(ctx, {"error": "GET required"}, 405)
         tail = route[len("history"):].strip("/")
-        return _handle_history(ctx, os_client, namespace, data_bucket, athlete_id, tail)
+        return _handle_history(ctx, os_client, namespace, data_bucket, subject, tail)
     return _json_response(ctx, {"error": "no such endpoint"}, 404)
 
 
@@ -760,12 +809,16 @@ def handler(ctx, data: io.BytesIO = None):
     # athlete reading another's sessions by knowing an id.
     if path.startswith("/api/"):
         return _handle_api(ctx, data, method, path, os_client, namespace,
-                           data_bucket, athlete_id)
+                           data_bucket, athlete_id, doc=doc, query=query)
 
     # A workout request is rewritten onto the caller's own prefix. The app
     # asks for /wods/<date>.json and never knows the athlete is there.
     if path.startswith("/wods/"):
-        scoped = _athlete_workout_object(athlete_id, path)
+        requested = (parse_qs(query).get("athlete", [""])[0] or "").strip().lower()
+        subject = _may_act_for(doc, athlete_id, requested) if requested else athlete_id
+        if subject is None:
+            return _not_found(ctx)
+        scoped = _athlete_workout_object(subject, path)
         if scoped is None:
             return _not_found(ctx)
         return serve(ctx, os_client, namespace, data_bucket, scoped, protected=True)
