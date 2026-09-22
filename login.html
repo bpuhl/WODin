@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WODin — sign in</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/fonts.css">
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg,#0d1011); color:var(--fg,#e8eae9);
+    font-family:var(--font-body,'Barlow',system-ui,sans-serif);
+    display:flex; align-items:center; justify-content:center;
+    padding:24px calc(24px + env(safe-area-inset-right)) 24px calc(24px + env(safe-area-inset-left));
+  }
+  .card{width:100%;max-width:360px}
+  h1{
+    font-family:var(--font-display,'Barlow Condensed',sans-serif);
+    font-weight:700; letter-spacing:.02em; text-transform:uppercase;
+    font-size:38px; margin:0 0 4px;
+  }
+  .sub{color:var(--muted,#8b9490);font-size:15px;margin:0 0 28px}
+  label{
+    display:block; font-size:12px; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--muted,#8b9490); font-weight:600; margin:0 0 6px;
+  }
+  input{
+    width:100%; padding:14px 14px; margin:0 0 18px;
+    background:var(--surface,#161b1c); color:inherit;
+    border:1px solid var(--line,#2a3234); border-radius:10px;
+    font:inherit; font-size:17px;
+  }
+  /* Wide tracking and a monospaced face so a 6-digit PIN reads back
+     clearly while thumbing it in at a gym. */
+  #pin{
+    font-family:var(--font-mono,'JetBrains Mono',ui-monospace,monospace);
+    letter-spacing:.42em; text-indent:.42em; font-size:22px; text-align:center;
+  }
+  input:focus{outline:2px solid var(--accent,#c6f24e);outline-offset:1px;border-color:transparent}
+  button{
+    width:100%; padding:15px; border:0; border-radius:10px; cursor:pointer;
+    background:var(--accent,#c6f24e); color:#10140f;
+    font-family:var(--font-display,'Barlow Condensed',sans-serif);
+    font-weight:700; font-size:18px; letter-spacing:.06em; text-transform:uppercase;
+  }
+  button:active{transform:translateY(1px)}
+  .err{
+    display:none; background:rgba(229,90,74,.12); border:1px solid rgba(229,90,74,.5);
+    color:#f0a89f; border-radius:10px; padding:11px 13px; font-size:14px; margin:0 0 18px;
+  }
+  .err.show{display:block}
+  .note{color:var(--muted,#8b9490);font-size:13px;line-height:1.5;margin:22px 0 0}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>WODin</h1>
+    <p class="sub">Sign in to see your workout.</p>
+
+    <!-- One message for any failure. Saying "no such athlete" would
+         confirm which names exist to anyone who asks. -->
+    <p class="err" id="err">That athlete and PIN don't match. Try again.</p>
+
+    <form method="POST" action="/login">
+      <label for="athlete">Athlete</label>
+      <input id="athlete" name="athlete" autocomplete="username"
+             autocapitalize="none" autocorrect="off" spellcheck="false" required>
+
+      <label for="pin">PIN</label>
+      <input id="pin" name="pin" inputmode="numeric" pattern="[0-9]*"
+             maxlength="8" autocomplete="current-password" required>
+
+      <input type="hidden" name="next" id="next" value="/">
+      <button type="submit">Sign in</button>
+    </form>
+
+    <p class="note">Signing in keeps you signed in on this device, so a
+      workout opens with no signal at the gym.</p>
+  </div>
+
+<script>
+  (function () {
+    var q = new URLSearchParams(location.search);
+    if (q.get('e')) { document.getElementById('err').className = 'err show'; }
+
+    // Prefill the athlete from /brian, or from a failed attempt, so only
+    // the PIN has to be typed on a phone.
+    var seg = location.pathname.replace(/^\/+|\/+$/g, '');
+    var who = q.get('a') || (seg && seg.indexOf('/') === -1 && seg !== 'login' ? seg : '');
+    var athlete = document.getElementById('athlete');
+    if (who) { athlete.value = who; }
+
+    var next = q.get('next') || '/';
+    if (next.charAt(0) !== '/' || next.charAt(1) === '/') { next = '/'; }
+    document.getElementById('next').value = next;
+
+    // Straight to the PIN when the athlete is already known.
+    (who ? document.getElementById('pin') : athlete).focus();
+  })();
+</script>
+</body>
+</html>

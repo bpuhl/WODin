@@ -25,6 +25,7 @@ Requires the OCI CLI authenticated against the WODin compartment.
 
 import argparse
 import hashlib
+import re
 import json
 import os
 import secrets
@@ -49,6 +50,17 @@ ROSTER = "roster.json"
 SITE = os.environ.get("WODIN_SITE", "https://wod.imav8n.com")
 PBKDF2_ITERATIONS = 200000
 KEY_BYTES = 24            # ~32 url-safe chars; typed once, then remembered
+PIN_DIGITS = 6            # typed at a gym, so it has to be memorable
+
+# An athlete id is a URL segment (/brian), an object prefix
+# (results/brian/) and a login path all at once. Refuse anything that
+# collides with a real route -- after results exist under a prefix,
+# renaming is a migration rather than an edit.
+RESERVED_IDS = {
+    "api", "src", "styles", "fonts", "icons", "schema", "examples",
+    "wods", "results", "login", "auth", "roster", "sw", "index",
+    "manifest", "favicon", "robots", "admin", "static", "assets",
+}
 
 
 def run(args):
@@ -137,6 +149,50 @@ def find(doc, athlete_id):
     return None
 
 
+def valid_id(text):
+    text = text.strip().lower()
+    if text in RESERVED_IDS:
+        raise argparse.ArgumentTypeError(
+            "%r collides with a route on the site. Reserved: %s"
+            % (text, ", ".join(sorted(RESERVED_IDS))))
+    if not re.match(r"^[a-z0-9][a-z0-9_-]{0,31}$", text):
+        raise argparse.ArgumentTypeError(
+            "ids are lower-case letters, digits, - and _, starting with a "
+            "letter or digit, up to 32 characters -- it becomes a URL "
+            "segment and an object prefix")
+    return text
+
+
+def make_pin(pin=None):
+    """Return (pin, salt_hex, hash_hex, iterations)."""
+    if pin is None:
+        pin = "".join(secrets.choice("0123456789") for _ in range(PIN_DIGITS))
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", pin.encode("utf-8"), salt,
+                                 PBKDF2_ITERATIONS).hex()
+    return pin, salt.hex(), digest, PBKDF2_ITERATIONS
+
+
+def cmd_set_pin(args, doc):
+    a = find(doc, args.id)
+    if not a:
+        sys.exit("No athlete with id %r. Run `list` to see them." % args.id)
+    pin, salt, digest, iters = make_pin(args.pin)
+    a["pin_salt"], a["pin_hash"], a["pin_iterations"] = salt, digest, iters
+    print()
+    print("=" * 72)
+    print("  %s can now sign in by typing:" % (a.get("name") or a["id"]))
+    print()
+    print("    %s/%s" % (SITE, a["id"]))
+    print("    PIN: %s%s" % (pin, "  (chosen)" if args.pin else ""))
+    print()
+    print("  %d digits, so it is only safe because the gateway rate-limits"
+          % len(pin))
+    print("  and each attempt costs the server real work. Do not reuse it.")
+    print("=" * 72)
+    return True
+
+
 def cmd_add(args, doc):
     if find(doc, args.id):
         sys.exit("An athlete with id %r already exists. Remove it first, or "
@@ -161,6 +217,9 @@ def cmd_add(args, doc):
     print()
     print("    %s/?key=%s" % (SITE, key))
     print()
+    print("  Or set a PIN so they can just type the address:")
+    print("    python3 scripts/manage-athletes.py set-pin %s" % args.id)
+    print()
     print("  Their workouts go to wods/%s/<date>.json" % args.id)
     print()
     print("  Shown once and not recoverable -- only a hash is stored.")
@@ -173,12 +232,13 @@ def cmd_list(args, doc):
     if not athletes:
         print("No athletes. Nothing can reach a gated path.")
         return False
-    print("%-14s %-20s %-12s %s" % ("ID", "NAME", "ISSUED", "STATUS"))
+    print("%-14s %-20s %-12s %-9s %s" % ("ID", "NAME", "ISSUED", "STATUS", "SIGN-IN"))
     for a in sorted(athletes, key=lambda x: x.get("id", "")):
-        print("%-14s %-20s %-12s %s" % (
+        state = "disabled" if a.get("disabled") else "active"
+        print("%-14s %-20s %-12s %-9s %s" % (
             a.get("id", "?"), (a.get("name") or "")[:20],
-            a.get("issued", "?"),
-            "disabled" if a.get("disabled") else "active"))
+            a.get("issued", "?"), state,
+            "PIN set" if a.get("pin_hash") else "no PIN"))
     return False
 
 
@@ -225,12 +285,19 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     a = sub.add_parser("add", help="issue a device key for an athlete")
-    a.add_argument("--id", required=True,
-                   help="short identifier; also the results/<id>/ prefix")
+    a.add_argument("--id", required=True, type=valid_id,
+                   help="short identifier; also the URL segment and the "
+                        "results/<id>/ prefix")
     a.add_argument("--name", help="display name (defaults from --id)")
     a.set_defaults(fn=cmd_add)
 
     sub.add_parser("list", help="show athletes").set_defaults(fn=cmd_list)
+
+    sp = sub.add_parser("set-pin", help="set or regenerate a sign-in PIN")
+    sp.add_argument("id")
+    sp.add_argument("--pin", help="use this PIN instead of a random one "
+                                  "(%d digits recommended)" % PIN_DIGITS)
+    sp.set_defaults(fn=cmd_set_pin)
 
     for name, fn, helptext in (
             ("disable", cmd_disable, "revoke access, keeping the entry"),

@@ -64,6 +64,7 @@ import io
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, parse_qs, quote, urlencode
@@ -110,6 +111,7 @@ _NEVER_CACHE = ("index.html", "sw.js", "manifest.webmanifest")
 # documents an agent needs to resolve $id.
 _PUBLIC_OBJECTS = frozenset([
     "index.html", "sw.js", "manifest.webmanifest", "favicon.ico", "robots.txt",
+    "login.html",
 ])
 _PUBLIC_PREFIXES = ("src/", "styles/", "fonts/", "icons/", "schema/", "examples/")
 
@@ -155,6 +157,17 @@ _ROSTER_OBJECT = "roster.json"
 # matters by the second year, not the second week.
 _MAX_BODY_BYTES = 256 * 1024
 _COOKIE_NAME = "wodin_session"
+_LOGIN_OBJECT = "login.html"
+
+# An athlete id is a URL segment (/brian), an object prefix
+# (results/brian/) and now a login path, so it shares a namespace with
+# every real route. These must be refused at creation, before anything
+# lives under the prefix and renaming becomes a migration.
+_RESERVED_IDS = frozenset([
+    "api", "src", "styles", "fonts", "icons", "schema", "examples",
+    "wods", "results", "login", "auth", "roster", "sw", "index",
+    "manifest", "favicon", "robots", "admin", "static", "assets",
+])
 _PBKDF2_ITERATIONS = 200000
 
 # auth.json is read per request, so a short cache keeps browsing the app
@@ -287,6 +300,38 @@ def _verify_key(doc, key):
     return match
 
 
+def _verify_pin(doc, athlete_id, pin):
+    """Return the athlete if this id and PIN match, else None.
+
+    Separate from _verify_key: a device key is an unguessable 32-character
+    token checked against every athlete, whereas a PIN is short and only
+    meaningful against a named one. Scoping the comparison to the named
+    athlete is what keeps a 6-digit secret defensible -- an attacker must
+    pick a target rather than sweep the whole registry.
+    """
+    if not athlete_id or not pin or not pin.isdigit():
+        return None
+    for athlete in doc.get("athletes", []):
+        if athlete.get("id") != athlete_id or athlete.get("disabled"):
+            continue
+        salt, expected = athlete.get("pin_salt", ""), athlete.get("pin_hash", "")
+        if not salt or not expected:
+            return None          # no PIN set for this athlete
+        derived = hashlib.pbkdf2_hmac(
+            "sha256", pin.encode("utf-8"), bytes.fromhex(salt),
+            int(athlete.get("pin_iterations", _PBKDF2_ITERATIONS))).hex()
+        return athlete if hmac.compare_digest(derived, expected) else None
+    return None
+
+
+def _session_cookie(doc, secret, athlete):
+    days = int(doc.get("session_days", 365))
+    expires_at = time.time() + days * 86400
+    token = _make_session(secret, athlete.get("id", "athlete"), expires_at)
+    return ("%s=%s; Path=/; Max-Age=%d; HttpOnly; Secure; SameSite=Lax"
+            % (_COOKIE_NAME, token, int(days * 86400)))
+
+
 def _b64e(raw):
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
@@ -323,6 +368,25 @@ def _verify_session(secret, token):
     if float(claims.get("exp", 0)) < time.time():
         return None
     return claims.get("a")
+
+
+def _looks_like_athlete_path(path):
+    """A single lowercase segment that could be an athlete id.
+
+    Used to serve the login page at /brian. Deliberately does NOT consult
+    the roster: doing so would need a bucket read on an unauthenticated
+    path, and would turn a 404-vs-200 difference into an athlete-name
+    oracle. An unknown name simply gets a login page that will not accept
+    anything.
+    """
+    seg = path.strip("/")
+    if not seg or "/" in seg:
+        return None
+    if seg in _RESERVED_IDS or "." in seg:
+        return None
+    if not re.match(r"^[a-z0-9][a-z0-9_-]{0,31}$", seg):
+        return None
+    return seg
 
 
 def _is_public(object_name):
@@ -495,6 +559,35 @@ def _athlete_workout_object(athlete_id, path):
     return _WODS_PREFIX + athlete_id + "/" + tail
 
 
+def _handle_login(ctx, data, doc, os_client, namespace, bucket):
+    """athlete + PIN -> the same session cookie a device key produces."""
+    body = ""
+    if data is not None:
+        try:
+            body = data.getvalue().decode("utf-8")
+        except Exception:
+            body = ""
+    fields = parse_qs(body)
+    athlete_id = (fields.get("athlete", [""])[0] or "").strip().lower()
+    pin = (fields.get("pin", [""])[0] or "").strip()
+    next_path = (fields.get("next", ["/"])[0] or "/").strip()
+    if not next_path.startswith("/") or next_path.startswith("//"):
+        next_path = "/"
+
+    athlete = _verify_pin(doc, athlete_id, pin)
+    if not athlete:
+        # One message for every failure -- unknown athlete, wrong PIN,
+        # disabled account. Distinguishing them would confirm which names
+        # exist to anyone who asks.
+        log.info("wodin-server: failed login for '%s'", athlete_id[:32])
+        return _redirect(ctx, "/login?e=1" +
+                         ("&a=" + quote(athlete_id, safe="") if athlete_id else ""))
+
+    secret = doc.get("session_secret", "")
+    log.info("wodin-server: login ok for '%s'", athlete.get("id"))
+    return _redirect(ctx, next_path, cookie=_session_cookie(doc, secret, athlete))
+
+
 def _handle_api(ctx, data, method, path, os_client, namespace, data_bucket, athlete_id):
     route = path[len("/api/"):].strip("/")
     if route == "log":
@@ -559,9 +652,29 @@ def handler(ctx, data: io.BytesIO = None):
     # bucket, which is what keeps auth.json out of its reach.
     data_bucket = os.environ.get("DATA_BUCKET_NAME", bucket)
 
+    # --- login -----------------------------------------------------------
+    # Handled before anything else: it is the one route that must work for
+    # someone holding a device with no session and nothing to paste.
+    if path.rstrip("/") == "/login":
+        doc = _load_auth(os_client, namespace, bucket)
+        if method == "POST":
+            return _handle_login(ctx, data, doc, os_client, namespace, bucket)
+        return serve(ctx, os_client, namespace, bucket, _LOGIN_OBJECT)
+
     object_name = _resolve_object_name(path)
     if object_name is None or _is_never_served(object_name):
         return _not_found(ctx)
+
+    # /brian -> the login page, with the athlete prefilled by the page
+    # itself from the path. Only when there is no session already; an
+    # enrolled athlete visiting /brian should not be asked to log in again.
+    athlete_path = _looks_like_athlete_path(path)
+    if athlete_path and not _is_public(object_name):
+        doc = _load_auth(os_client, namespace, bucket)
+        if not _verify_session(doc.get("session_secret", ""),
+                               _cookie(ctx, _COOKIE_NAME)):
+            return serve(ctx, os_client, namespace, bucket, _LOGIN_OBJECT)
+        return _redirect(ctx, "/")
 
     # Enrolment is checked BEFORE the public-path shortcut, because the
     # enrolment URL people are actually given is the site root -- which is
@@ -589,11 +702,7 @@ def handler(ctx, data: io.BytesIO = None):
             if _is_public(object_name):
                 return serve(ctx, os_client, namespace, bucket, object_name)
             return _unauthorized(ctx)
-        days = int(doc.get("session_days", 365))
-        expires_at = time.time() + days * 86400
-        token = _make_session(secret, athlete.get("id", "athlete"), expires_at)
-        cookie = ("%s=%s; Path=/; Max-Age=%d; HttpOnly; Secure; SameSite=Lax"
-                  % (_COOKIE_NAME, token, int(days * 86400)))
+        cookie = _session_cookie(doc, secret, athlete)
         log.info("wodin-server: enrolled '%s'", athlete.get("id"))
         # Strip the key, keep everything else. Redirecting to the bare path
         # discarded the rest of the query, so a single

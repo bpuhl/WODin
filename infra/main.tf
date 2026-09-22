@@ -184,6 +184,21 @@ resource "oci_apigateway_deployment" "wodin" {
   path_prefix    = "/"
 
   specification {
+    request_policies {
+      # Not optional once a 6-digit PIN exists. A 32-character device key
+      # is unguessable and this would be decoration; 1,000,000 PINs
+      # against an unthrottled endpoint is a weekend's work. Combined with
+      # the PBKDF2 cost per attempt, exhausting the space from one address
+      # takes days against a single named athlete.
+      #
+      # Perch has carried this since its own build; WODin was simply never
+      # given it, which did not matter until now.
+      rate_limiting {
+        rate_in_requests_per_second = 5
+        rate_key                    = "CLIENT_IP"
+      }
+    }
+
     # "/" and "/{path*}" are separate routes because a path-parameter route
     # does not match the empty path -- with only the wildcard, the site root
     # 404s and only deep links work.

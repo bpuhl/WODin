@@ -12,6 +12,7 @@ const CACHE = 'app-dev';
 const SHELL = [
   '.',
   'manifest.webmanifest',
+  'login.html',
   'src/main.js',
   'src/icons.js',
   'src/planned.js',
