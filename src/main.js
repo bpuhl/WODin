@@ -10,6 +10,7 @@
 
 import { ICON } from './icons.js';
 import { isAsPlanned } from './planned.js';
+import { hasSink, sheetActions } from './submit.js';
 
 // Replaced by scripts/build.mjs with the same content hash the service worker
 // caches under. Shown in the library so "is this thing even updated?" is a
@@ -638,7 +639,7 @@ function bind() {
       save(); renderWorkout(); return;
     }
     if (e.target.closest('#shareWod')) return void shareWod();
-    if (e.target.id === 'log') return openSheet();
+    if (e.target.id === 'log') return logWorkout();
     if (e.target.closest('#home')) {
       e.preventDefault();
       location.hash = '';
@@ -879,34 +880,83 @@ function sink(act, icon, title, desc, primary) {
   </button>`;
 }
 
-function openSheet() {
-  // Reaching for Submit ends the session, so stop the clock before reading it.
-  // Pause rather than reset: nothing is destroyed, and Resume is there if the
-  // sheet was opened early. It also keeps the duration honest — a clock still
-  // running behind the sheet would show one number in the preview and send
-  // another by the time anything was tapped.
-  if (S.running) {
-    S.elapsed = elapsedNow();
-    S.running = false;
-    S.startedAt = null;
-    save();
-    renderWorkout();
-    runTick();
+/* Handing the result off in any form is the athlete finishing with this
+ * session — that is what the library's "Logged" badge reports. A copy is
+ * not proof it was pasted, but it is the last thing observable, and
+ * leaving a finished workout labelled "In progress" forever is the worse
+ * error. */
+const markSent = () => { S.submittedAt = new Date().toISOString(); save(); };
+
+/* Logging ends the session, so stop the clock before reading it. Pause
+ * rather than reset: nothing is destroyed, and Resume is there if the
+ * button was hit early. It also keeps the duration honest — a clock still
+ * running would show one number and send another. */
+function stopClock() {
+  if (!S.running) return;
+  S.elapsed = elapsedNow();
+  S.running = false;
+  S.startedAt = null;
+  save();
+  renderWorkout();
+  runTick();
+}
+
+/* What "Log workout" does.
+ *
+ * With a sink configured — which is every workout this deployment
+ * publishes — it just saves. One tap. The sheet was upstream's answer to
+ * having no server: Share and Copy were the only ways a result could
+ * reach a coach. We have somewhere to put it.
+ *
+ * The sheet still exists, and only appears when the send actually fails.
+ * That case is real rather than theoretical: this app is for gyms, gyms
+ * have no signal, and a one-tap save that quietly fails there would be
+ * worse than the four buttons it replaced. Share and Copy are then the way
+ * the session still reaches a coach.
+ */
+async function logWorkout() {
+  stopClock();
+
+  if (!hasSink(WOD)) {
+    // A workout opened from a shared #w= link carries no sink. Handing it
+    // back by Share or Copy is the only route there is.
+    return openSheet();
   }
 
+  const btn = $('log');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  const ok = await postResult();
+  if (btn) { btn.disabled = false; btn.textContent = 'Log workout'; }
+
+  if (ok) {
+    markSent();
+    renderWorkout();   // the header reflects a logged session immediately
+  } else {
+    openSheet();
+  }
+}
+
+function openSheet() {
+  stopClock();
   $('digest').textContent = buildDigest();
 
   const canShare = typeof navigator.share === 'function';
-  const posting = WOD.sink && WOD.sink.type === 'post' && WOD.sink.url;
 
-  $('sinks').innerHTML = [
-    posting ? sink('post', ICON.send, 'Send to coach',
-      WOD.sink.mode === 'blind' ? 'Posts to your agent — no delivery receipt' : 'Posts straight to your agent',
-      true) : '',
-    canShare ? sink('share', ICON.share, 'Share', 'Hand it to any app', !posting) : '',
-    sink('copy', ICON.copy, 'Copy summary', 'Paste into any chat', !posting && !canShare),
-    sink('download', ICON.json, 'Download JSON', 'The structured result payload', false)
-  ].join('');
+  // No "Send to coach" here any more: reaching this sheet means the send
+  // is what failed. Offering the thing that just failed as the primary
+  // action would be a loop.
+  //
+  // No "Download JSON" either. It existed so a result could be recovered
+  // by hand; results now land in the bucket, which is a better place to
+  // read them from than a phone's downloads folder.
+  const actions = sheetActions({ canShare });
+  const meta = {
+    share: [ICON.share, 'Share', 'Hand it to any app'],
+    copy:  [ICON.copy,  'Copy summary', 'Paste into any chat']
+  };
+  $('sinks').innerHTML = actions
+    .map((a, i) => sink(a, meta[a][0], meta[a][1], meta[a][2], i === 0))
+    .join('');
 
   $('scrim').hidden = false;
 }
@@ -927,17 +977,7 @@ $('scrim').addEventListener('click', async e => {
 
   const digest = buildDigest();
 
-  // Handing the result off in any form is the athlete finishing with this
-  // session — that is what the library's "Logged" badge reports. A copy is not
-  // proof it was pasted, but it is the last thing we can observe, and leaving a
-  // finished workout labelled "In progress" forever is the worse error.
-  const markSent = () => { S.submittedAt = new Date().toISOString(); save(); };
-
   switch (btn.dataset.sink) {
-    case 'post':
-      if (await postResult()) markSent();
-      break;
-
     case 'share':
       try {
         await navigator.share({ title: 'WODin ' + WOD.workoutId, text: digest });
