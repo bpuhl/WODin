@@ -104,6 +104,8 @@ def write_roster(doc, ns):
                 "id": a["id"],
                 "name": a.get("name") or a["id"].title(),
                 "disabled": bool(a.get("disabled")),
+                "role": a.get("role") or "athlete",
+                "coaches": list(a.get("athletes") or []) if a.get("role") == "coach" else [],
                 "wods": "wods/%s/" % a["id"],
                 "results": "results/%s/" % a["id"],
             }
@@ -232,13 +234,16 @@ def cmd_list(args, doc):
     if not athletes:
         print("No athletes. Nothing can reach a gated path.")
         return False
-    print("%-14s %-20s %-12s %-9s %s" % ("ID", "NAME", "ISSUED", "STATUS", "SIGN-IN"))
+    print("%-14s %-18s %-9s %-8s %-22s %s" % ("ID", "NAME", "STATUS", "SIGN-IN", "ROLE", "ISSUED"))
     for a in sorted(athletes, key=lambda x: x.get("id", "")):
         state = "disabled" if a.get("disabled") else "active"
-        print("%-14s %-20s %-12s %-9s %s" % (
-            a.get("id", "?"), (a.get("name") or "")[:20],
-            a.get("issued", "?"), state,
-            "PIN set" if a.get("pin_hash") else "no PIN"))
+        role = a.get("role") or "athlete"
+        if role == "coach":
+            role += " (%s)" % ",".join(a.get("athletes") or [])
+        print("%-14s %-18s %-9s %-8s %-22s %s" % (
+            a.get("id", "?"), (a.get("name") or "")[:18],
+            state, "PIN" if a.get("pin_hash") else "-",
+            role[:22], a.get("issued", "?")))
     return False
 
 
@@ -250,6 +255,35 @@ def _set_disabled(doc, athlete_id, value):
     if not value:
         a.pop("disabled", None)
     return a
+
+
+def cmd_set_role(args, doc):
+    a = find(doc, args.id)
+    if not a:
+        sys.exit("No athlete with id %r." % args.id)
+    if args.role == "athlete":
+        a.pop("role", None)
+        a.pop("athletes", None)
+        print("%s is now a plain athlete (sees only their own sessions)." % args.id)
+        return True
+    if args.role == "coach":
+        if not args.athletes:
+            sys.exit("A coach needs --athletes: a coach with nobody assigned "
+                     "can do nothing a plain athlete cannot.")
+        missing = [x for x in args.athletes if not find(doc, x)]
+        if missing:
+            sys.exit("No such athlete(s): %s" % ", ".join(missing))
+        a["role"] = "coach"
+        a["athletes"] = list(args.athletes)
+        print("%s now coaches: %s" % (args.id, ", ".join(args.athletes)))
+        print("They can read those athletes' history and log sessions for them.")
+        print("Every result records who submitted it, so a coach-logged "
+              "session is distinguishable from a self-logged one.")
+        return True
+    a["role"] = "admin"
+    a.pop("athletes", None)
+    print("%s is now an admin (may act for every athlete)." % args.id)
+    return True
 
 
 def cmd_disable(args, doc):
@@ -292,6 +326,15 @@ def main():
     a.set_defaults(fn=cmd_add)
 
     sub.add_parser("list", help="show athletes").set_defaults(fn=cmd_list)
+
+    r = sub.add_parser("set-role", help="make someone a coach or admin")
+    r.add_argument("id")
+    r.add_argument("role", choices=["athlete", "coach", "admin"])
+    r.add_argument("--athletes", nargs="+", metavar="ID",
+                   help="for a coach: exactly whose sessions they may see "
+                        "and log. Scoped deliberately -- a coach is not an "
+                        "admin.")
+    r.set_defaults(fn=cmd_set_role)
 
     sp = sub.add_parser("set-pin", help="set or regenerate a sign-in PIN")
     sp.add_argument("id")

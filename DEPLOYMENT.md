@@ -36,13 +36,19 @@ Read `roster.json`:
 ```json
 {
   "version": 1,
-  "generated": "2026-09-21",
+  "generated": "2026-09-22",
   "athletes": [
-    { "id": "brian", "name": "Brian", "disabled": false,
-      "wods": "wods/brian/", "results": "results/brian/" }
+    { "id": "brian", "name": "Brian", "disabled": false, "role": "athlete",
+      "coaches": [], "wods": "wods/brian/", "results": "results/brian/" },
+    { "id": "doc", "name": "Doc", "disabled": false, "role": "coach",
+      "coaches": ["brian"], "wods": "wods/doc/", "results": "results/doc/" }
   ]
 }
 ```
+
+`role` is `athlete`, `coach` or `admin`. For a coach, `coaches` names
+exactly the athletes they may act for. A coach is still an athlete in
+their own right, with their own `wods/` and `results/`.
 
 Skip anyone `disabled`. Each entry tells you both paths, so you never have
 to construct them.
@@ -92,6 +98,20 @@ could be a 500m split or a rep time.
 
 Write the denominator in the plan; assume `/500m` when reading a rowing
 result back.
+
+#### Sessions logged by someone else
+
+A coach may log a session on an athlete's behalf, so a result carries two
+identities:
+
+```json
+{ "athleteId": "brian", "submittedBy": "doc" }
+```
+
+`athleteId` is whose training it is; `submittedBy` is who sent it. They
+differ only when a coach logged it. Treat `submittedBy != athleteId` as
+second-hand: the numbers were entered by someone who was not necessarily
+holding the bar, which is worth weighing before prescribing from them.
 
 #### asPlanned, and what it does not mean
 

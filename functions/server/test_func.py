@@ -699,6 +699,83 @@ class TestAvailableDays(unittest.TestCase):
         self.assertEqual(self.days()["dates"], [])
 
 
+class TestRoles(unittest.TestCase):
+    """#23: coaches scoped to named athletes, and able to log for them."""
+
+    def setUp(self):
+        self.doc = {"athletes": [
+            {"id": "brian"},
+            {"id": "sam"},
+            {"id": "kid"},
+            {"id": "doc", "role": "coach", "athletes": ["brian", "sam"]},
+            {"id": "boss", "role": "admin"},
+            {"id": "ex", "role": "coach", "athletes": ["brian"], "disabled": True},
+        ]}
+
+    def may(self, who, target):
+        return func._may_act_for(self.doc, who, target)
+
+    def test_everyone_acts_for_themselves(self):
+        for who in ("brian", "doc", "boss"):
+            self.assertEqual(self.may(who, who), who)
+
+    def test_a_plain_athlete_cannot_act_for_anyone_else(self):
+        self.assertIsNone(self.may("brian", "sam"))
+
+    def test_a_coach_acts_only_for_their_own_list(self):
+        self.assertEqual(self.may("doc", "brian"), "brian")
+        self.assertEqual(self.may("doc", "sam"), "sam")
+        self.assertIsNone(self.may("doc", "kid"),
+                          "kid is not assigned to this coach")
+
+    def test_an_admin_acts_for_any_real_athlete(self):
+        self.assertEqual(self.may("boss", "kid"), "kid")
+        self.assertIsNone(self.may("boss", "ghost"),
+                          "an admin still cannot invent an athlete")
+
+    def test_a_disabled_coach_loses_delegation(self):
+        self.assertIsNone(self.may("ex", "brian"))
+
+    def test_no_target_means_yourself(self):
+        self.assertEqual(self.may("brian", ""), "brian")
+        self.assertEqual(self.may("brian", None), "brian")
+
+    def test_refusal_is_none_not_a_fallback(self):
+        # Callers put this straight into a bucket prefix. Falling back to
+        # the caller would silently write one person's session into
+        # another's history.
+        self.assertIsNone(self.may("brian", "sam"))
+
+
+class TestLoggingOnBehalf(unittest.TestCase):
+    def setUp(self):
+        self.bucket = FakeBucket({})
+
+    def post(self, athlete, submitted_by=None):
+        body = json.dumps({"workoutId": "2026-09-22", "log": {}}).encode()
+        return func._handle_log(None, io.BytesIO(body), self.bucket, "ns",
+                                "data", athlete, submitted_by)
+
+    def stored(self, athlete):
+        return json.loads(self.bucket.objects["results/%s/2026-09-22.json" % athlete])
+
+    def test_a_coach_submission_records_both_identities(self):
+        self.post("brian", submitted_by="doc")
+        r = self.stored("brian")
+        self.assertEqual(r["athleteId"], "brian", "stored against the athlete")
+        self.assertEqual(r["submittedBy"], "doc", "but attributed to the coach")
+
+    def test_self_submission_attributes_to_self(self):
+        self.post("brian")
+        self.assertEqual(self.stored("brian")["submittedBy"], "brian")
+
+    def test_history_surfaces_who_submitted(self):
+        # An athlete should be able to see a session was logged for them.
+        self.post("brian", submitted_by="doc")
+        res = func._handle_history(None, self.bucket, "ns", "data", "brian", "")
+        self.assertEqual(json.loads(res.response_data)["sessions"][0]["submittedBy"], "doc")
+
+
 class TestCaching(unittest.TestCase):
     def test_shell_is_not_cached_hard(self):
         # A cached sw.js or index.html pins installed PWAs to an old build
