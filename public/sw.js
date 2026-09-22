@@ -16,6 +16,7 @@ const SHELL = [
   'src/main.js',
   'src/icons.js',
   'src/planned.js',
+  'src/submit.js',
   'src/app.css',
   'styles/tokens.css',
   'styles/fonts.css',
