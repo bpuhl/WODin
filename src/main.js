@@ -11,11 +11,19 @@
 import { ICON } from './icons.js';
 import { isAsPlanned } from './planned.js';
 import { hasSink, sheetActions } from './submit.js';
+import { neighbours, mostRecent } from './days.js';
 
 // Replaced by scripts/build.mjs with the same content hash the service worker
 // caches under. Shown in the library so "is this thing even updated?" is a
 // question you can answer by looking, rather than by guessing.
 const BUILD = '__BUILD__';
+
+/* Which date is on screen, and every date this athlete has a workout for.
+ * Populated only for workouts that came from the site (?d= or today's);
+ * a #w= link is a one-off with no surrounding days to step through. */
+let VIEW_DATE = null;
+let AVAILABLE_DAYS = null;
+let SIGNED_IN = false;
 const REPO = 'https://github.com/bpuhl/WODin';
 
 // Shown on every view. The repo link is the answer to "what is this thing and can
@@ -254,6 +262,22 @@ function field({ id, val, unit, ph, mode, cls }) {
 
 /* ── render: workout ─────────────────────────────────────────── */
 
+/* Prev/next, rendered only when there is somewhere to go.
+ *
+ * Absent entirely for a #w= link: those have no surrounding days, and a
+ * pair of dead arrows would suggest otherwise. Each side is omitted rather
+ * than disabled at the ends, so the control never advertises a workout
+ * that is not there. */
+function dayNavHtml() {
+  if (!VIEW_DATE || !AVAILABLE_DAYS || AVAILABLE_DAYS.length === 0) return '';
+  const { prev, next } = neighbours(AVAILABLE_DAYS, VIEW_DATE);
+  if (!prev && !next) return '';
+  const btn = (d, label, aria) => d
+    ? `<a class="daynav" href="?d=${encodeURIComponent(d)}" aria-label="${aria}">${label}</a>`
+    : `<span class="daynav is-off" aria-hidden="true">${label}</span>`;
+  return `<span class="daynav-group">${btn(prev, '‹', 'Previous workout')}${btn(next, '›', 'Next workout')}</span>`;
+}
+
 function renderWorkout() {
   const d = new Date((WOD.date || WOD.workoutId) + 'T12:00:00');
   const nice = isNaN(d) ? (WOD.date || '')
@@ -440,7 +464,22 @@ function renderLibrary() {
   // would be a plain lie here.
   const installed = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 
-  const empty = installed
+  // A signed-in athlete is in a different situation from someone who
+  // arrived on a shared link: nothing is missing, there simply is no
+  // workout today. Telling them "your coach sends you a link" is both
+  // wrong and unhelpful -- what they want is the last one.
+  const recent = SIGNED_IN ? mostRecent(AVAILABLE_DAYS || [], todayLocal()) : null;
+  const signedInEmpty = SIGNED_IN
+    ? `<div class="lib-empty">
+         <p><b>No workout posted for today.</b></p>
+         ${recent
+           ? `<p style="margin-bottom:0">Your last one was
+              <a href="?d=${encodeURIComponent(recent)}">${esc(recent)}</a>.</p>`
+           : `<p style="margin-bottom:0">Nothing has been published yet.</p>`}
+       </div>`
+    : null;
+
+  const empty = signedInEmpty || (installed
     ? `<div class="lib-empty">
          <p><b>Nothing here yet.</b> Workout links open in your browser, not in this
          installed app — and the two keep separate storage, so what you opened there
@@ -453,7 +492,7 @@ function renderLibrary() {
          workout opens straight into this app — after that it stays on this device,
          listed here, and works with no signal.</p>
          <p style="margin-bottom:0">A link looks like <code>…/WODin/#w=…</code></p>
-       </div>`;
+       </div>`);
 
   $('app').innerHTML = `
     <header>
@@ -801,6 +840,25 @@ function buildResult() {
  * open on the 22nd where the athlete is standing; a UTC day boundary would
  * hand an early-morning or late-evening session the wrong day. The agent
  * names the file, so the two only have to agree on the calendar date. */
+/* The list of days, fetched once. A 401 means not signed in, which is not
+ * an error -- a shared #w= link has no days to step through and should
+ * show no navigation at all. */
+async function loadDays() {
+  if (AVAILABLE_DAYS) return AVAILABLE_DAYS;
+  try {
+    const res = await fetch('api/days');
+    // A 401 is the signed-out answer, and it is the only way the app can
+    // tell: the session cookie is HttpOnly on purpose, so JS cannot read
+    // it. The request itself is the question.
+    SIGNED_IN = res.ok;
+    if (!res.ok) return (AVAILABLE_DAYS = []);
+    AVAILABLE_DAYS = (await res.json()).dates || [];
+  } catch {
+    AVAILABLE_DAYS = [];   // offline: leave SIGNED_IN as it was
+  }
+  return AVAILABLE_DAYS;
+}
+
 function todayLocal() {
   const d = new Date();
   const p = n => String(n).padStart(2, '0');
@@ -1013,6 +1071,10 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') $('scrim').h
 /* ── routing ─────────────────────────────────────────────────── */
 
 async function resolveWod() {
+  // Kick the day list off without waiting for it: the workout should
+  // paint immediately, and navigation can appear a moment later.
+  loadDays().then(() => { if (VIEW_DATE && WOD) renderWorkout(); });
+
   if (location.hash) {
     try {
       const wod = await decodeFragment(location.hash);
@@ -1027,7 +1089,7 @@ async function resolveWod() {
   if (d) {
     try {
       const res = await fetch(`wods/${encodeURIComponent(d)}.json`);
-      if (res.ok) return await res.json();
+      if (res.ok) { VIEW_DATE = d; return await res.json(); }
     } catch { /* offline or absent — fall through to the library */ }
   }
 
@@ -1039,8 +1101,9 @@ async function resolveWod() {
   // or a 404 falls through to the library exactly as before, so nobody
   // sees an error for not having one.
   try {
-    const res = await fetch(`wods/${todayLocal()}.json`);
-    if (res.ok) return await res.json();
+    const today = todayLocal();
+    const res = await fetch(`wods/${today}.json`);
+    if (res.ok) { VIEW_DATE = today; return await res.json(); }
   } catch { /* offline with nothing cached — the library is the fallback */ }
 
   return null;

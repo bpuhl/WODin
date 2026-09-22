@@ -525,6 +525,35 @@ def _handle_log(ctx, data, os_client, namespace, data_bucket, athlete_id):
                                 "receivedAt": submitted_at}, 201)
 
 
+def _handle_days(ctx, os_client, namespace, data_bucket, athlete_id):
+    """Which dates this athlete actually has a workout for.
+
+    Listed from the bucket rather than kept in an index, because the
+    AGENT writes these files -- it publishes straight to Object Storage
+    and never calls us, so there is no moment at which we could maintain
+    an index without it drifting the first time the agent wrote one and we
+    were not looking.
+
+    Listing a year of dates is one call. Results keep their index because
+    the function writes those itself and can keep it honest.
+    """
+    prefix = _WODS_PREFIX + athlete_id + "/"
+    dates = []
+    start = None
+    while True:
+        page = os_client.list_objects(namespace, data_bucket, prefix=prefix,
+                                      start=start, limit=1000)
+        for obj in (page.data.objects or []):
+            name = obj.name[len(prefix):]
+            if name.endswith(".json"):
+                dates.append(name[:-len(".json")])
+        start = getattr(page.data, "next_start_with", None)
+        if not start:
+            break
+    dates.sort()
+    return _json_response(ctx, {"athleteId": athlete_id, "dates": dates})
+
+
 def _handle_history(ctx, os_client, namespace, data_bucket, athlete_id, tail):
     base = _RESULTS_PREFIX + athlete_id + "/"
     if not tail:
@@ -594,6 +623,10 @@ def _handle_api(ctx, data, method, path, os_client, namespace, data_bucket, athl
         if method != "POST":
             return _json_response(ctx, {"error": "POST required"}, 405)
         return _handle_log(ctx, data, os_client, namespace, data_bucket, athlete_id)
+    if route == "days":
+        if method not in ("GET", "HEAD"):
+            return _json_response(ctx, {"error": "GET required"}, 405)
+        return _handle_days(ctx, os_client, namespace, data_bucket, athlete_id)
     if route == "history" or route.startswith("history/"):
         if method not in ("GET", "HEAD"):
             return _json_response(ctx, {"error": "GET required"}, 405)
