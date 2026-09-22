@@ -776,6 +776,45 @@ class TestLoggingOnBehalf(unittest.TestCase):
         self.assertEqual(json.loads(res.response_data)["sessions"][0]["submittedBy"], "doc")
 
 
+class TestHistoryForTheApp(unittest.TestCase):
+    """The history view reads these two endpoints, so their shape is what
+    the UI depends on."""
+
+    def setUp(self):
+        self.bucket = FakeBucket({})
+        body = json.dumps({"schema": "wodin/result@1", "workoutId": "2026-09-22",
+                           "title": "Row Intervals", "duration": "12:00",
+                           "durationSec": 720, "rpe": 7,
+                           "athleteSummary": "Felt strong",
+                           "log": {"ex1.s1": {"distance": 250, "duration": "2:10",
+                                              "asPlanned": True}},
+                           "notes": {"ex1": "smooth"},
+                           "skipped": []}).encode()
+        func._handle_log(None, io.BytesIO(body), self.bucket, "ns", "data",
+                         "brian", "doc")
+
+    def test_the_list_carries_what_a_row_shows(self):
+        res = func._handle_history(None, self.bucket, "ns", "data", "brian", "")
+        row = json.loads(res.response_data)["sessions"][0]
+        for field in ("workoutId", "title", "duration", "rpe", "sets",
+                      "skipped", "submittedBy"):
+            self.assertIn(field, row, field)
+
+    def test_the_detail_carries_what_a_session_page_shows(self):
+        res = func._handle_history(None, self.bucket, "ns", "data", "brian",
+                                   "2026-09-22")
+        r = json.loads(res.response_data)
+        self.assertEqual(r["athleteSummary"], "Felt strong")
+        self.assertEqual(r["notes"], {"ex1": "smooth"})
+        self.assertIn("ex1.s1", r["log"])
+        self.assertEqual(r["submittedBy"], "doc")
+
+    def test_a_missing_session_is_404_not_an_empty_page(self):
+        res = func._handle_history(None, self.bucket, "ns", "data", "brian",
+                                   "2099-01-01")
+        self.assertEqual(res.status_code, 404)
+
+
 class TestCaching(unittest.TestCase):
     def test_shell_is_not_cached_hard(self):
         # A cached sw.js or index.html pins installed PWAs to an old build

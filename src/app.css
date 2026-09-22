@@ -650,3 +650,17 @@ h2 {
 .daynav.is-off { opacity: .25; border-style: dashed; }
 
 @media print { .daynav-group { display: none; } }
+
+/* ── history ──────────────────────────────────────────────────── */
+.lib-h {
+  font-family: var(--font-display); font-weight: 700; text-transform: uppercase;
+  letter-spacing: .04em; font-size: 22px; margin: 22px 0 10px;
+}
+
+.lib-h-sub { margin: 16px 0 0; font-size: 15px; }
+.lib-h-sub a { color: var(--accent); text-decoration: none; }
+.lib-h-sub a:hover { text-decoration: underline; }
+
+/* A history row is a record, not a control, so it reads flatter than a
+   library item even though it reuses the class. */
+a.lib-item { text-decoration: none; color: inherit; }
