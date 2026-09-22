@@ -630,3 +630,23 @@ h2 {
 @media (min-width: 900px)  and (min-height: 440px) and (max-height: 619px) { :root { --ui-scale: 1.4;  } }
 @media (min-width: 1100px) and (min-height: 480px) and (max-height: 619px) { :root { --ui-scale: 1.6;  } }
 @media (min-width: 1300px) and (min-height: 520px) and (max-height: 619px) { :root { --ui-scale: 1.85; } }
+
+/* ── day navigation ───────────────────────────────────────────── */
+/* Sits with the date in the eyebrow. Each arrow is omitted rather than
+   disabled at the ends, so the control never offers a day that is not
+   there — but a placeholder keeps the date from shifting sideways as the
+   athlete steps through. */
+.daynav-group { display: inline-flex; gap: 2px; margin-right: 8px; vertical-align: middle; }
+
+.daynav {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px;
+  border: 1px solid var(--line); border-radius: 8px;
+  color: var(--fg); text-decoration: none;
+  font-size: 18px; line-height: 1;
+}
+
+.daynav:active { transform: translateY(1px); }
+.daynav.is-off { opacity: .25; border-style: dashed; }
+
+@media print { .daynav-group { display: none; } }

@@ -88,6 +88,12 @@ class FakeBucket:
         self.writes.append((bucket, name))
         self.objects[name] = body
 
+    def list_objects(self, namespace, bucket, prefix=None, start=None, limit=None):
+        names = sorted(n for n in self.objects if not prefix or n.startswith(prefix))
+        objs = [types.SimpleNamespace(name=n) for n in names]
+        return types.SimpleNamespace(
+            data=types.SimpleNamespace(objects=objs, next_start_with=None))
+
 
 def serve(name, payload):
     client = FakeBucket({name: payload})
@@ -655,6 +661,42 @@ class TestTypeableLogin(unittest.TestCase):
                   "/src/main.js", "/wods/2026-09-22.json", "/sw.js",
                   "/Brian", "/", "/a/b"):
             self.assertIsNone(func._looks_like_athlete_path(p), p)
+
+
+class TestAvailableDays(unittest.TestCase):
+    """#13 needs to know which dates exist, so "next" is only offered when
+    there is a next."""
+
+    def setUp(self):
+        self.bucket = FakeBucket({
+            "wods/brian/2026-09-20.json": b"{}",
+            "wods/brian/2026-09-22.json": b"{}",
+            "wods/brian/2026-09-18.json": b"{}",
+            "wods/sam/2026-09-21.json": b"{}",
+            "wods/brian/notes.txt": b"x",
+        })
+
+    def days(self, athlete="brian"):
+        res = func._handle_days(None, self.bucket, "ns", "data", athlete)
+        return json.loads(res.response_data)
+
+    def test_returns_this_athletes_dates_sorted(self):
+        # Sorted, because prev/next is meaningless on an arbitrary order,
+        # and gapped, because rest days exist -- "previous" must mean the
+        # previous day that HAS one, not yesterday.
+        self.assertEqual(self.days()["dates"],
+                         ["2026-09-18", "2026-09-20", "2026-09-22"])
+
+    def test_does_not_leak_another_athletes_days(self):
+        self.assertNotIn("2026-09-21", self.days()["dates"])
+        self.assertEqual(self.days("sam")["dates"], ["2026-09-21"])
+
+    def test_ignores_non_workout_objects(self):
+        self.assertNotIn("notes", str(self.days()["dates"]))
+
+    def test_no_workouts_is_not_an_error(self):
+        self.bucket.objects = {}
+        self.assertEqual(self.days()["dates"], [])
 
 
 class TestCaching(unittest.TestCase):
