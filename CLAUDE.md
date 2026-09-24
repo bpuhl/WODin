@@ -64,3 +64,14 @@
   preflight and forget the POST. WODin shipped claiming "Send failed" there, while payloads
   were arriving fine; a real smoke test caught it. Only `navigator.onLine === false` lets us
   say "nothing sent". Everything else that throws is "Sent — delivery not confirmed".
+
+## Before changing infrastructure
+
+Read `~/projects/PATTERNS.md`. It collects the OCI, Actions, service-worker
+and testing traps that already cost real debugging time on this project and
+its two siblings (`~/projects/pulse`, `~/projects/perch`), which run the same
+stack. Several of those failures recurred *because* the lesson lived only in
+one project's history.
+
+The sibling repos' `infra/` and `functions/` carry the same reasoning inline,
+next to the code it constrains — worth reading before writing new Terraform.
