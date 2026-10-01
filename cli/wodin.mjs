@@ -52,6 +52,63 @@ function cmdLink(file) {
 
 /* ── render ──────────────────────────────────────────────────── */
 
+/* Bundle src/main.js and every module it reaches into one classic-scoped
+ * script, for a page opened from file:// that has nothing to import from.
+ *
+ * Each module runs in its own function scope and returns its exports, so
+ * top-level names that never met as modules cannot collide once inlined —
+ * main.js and scheme.js both declare toSec, which plain concatenation
+ * turns into a SyntaxError. Dependencies are emitted first.
+ *
+ * Only the forms this codebase uses are understood: `import { a, b as c }
+ * from './x.js'` and `export function|const|let|class`. Anything else is
+ * refused loudly rather than inlined half-working — which is exactly how
+ * the old one-regex version shipped a page that could not boot (#44). */
+function bundle(entry) {
+  const order = [];
+  const seen = new Map();   // absolute path -> { imports, exports, body }
+
+  const visit = (abs, chain = []) => {
+    if (chain.includes(abs)) throw new Error(`import cycle: ${[...chain, abs].map(p => path.basename(p)).join(' → ')}`);
+    if (seen.has(abs)) return;
+    let body = readFileSync(abs, 'utf8');
+    const imports = [];
+    body = body.replace(/^import\s*\{([^}]*)\}\s*from\s*'(\.{1,2}\/[^']+)';?[ \t]*$/gm, (_, names, rel) => {
+      imports.push({ from: path.resolve(path.dirname(abs), rel), names: names.split(',').map(n => n.trim()).filter(Boolean) });
+      return '';
+    });
+    const exports = [];
+    body = body.replace(/^export\s+((?:async\s+)?(?:function\*?|const|let|class)\s+([A-Za-z_$][\w$]*))/gm, (_, decl, name) => {
+      exports.push(name);
+      return decl;
+    });
+    const leftover = body.match(/^\s*(import|export)\b.*$/m);
+    if (leftover) throw new Error(`${path.relative(ROOT, abs)}: cannot inline "${leftover[0].trim()}"`);
+
+    seen.set(abs, { imports, exports, body });
+    imports.forEach(i => visit(i.from, [...chain, abs]));
+    order.push(abs);
+  };
+  visit(path.resolve(entry));
+
+  const key = abs => JSON.stringify(path.relative(ROOT, abs));
+  const bindings = ({ imports }) => imports.map(i => {
+    const names = i.names.map(n => n.replace(/^([\w$]+)\s+as\s+([\w$]+)$/, '$1: $2')).join(', ');
+    return `const { ${names} } = __wodin[${key(i.from)}];`;
+  }).join('\n');
+
+  const parts = ['const __wodin = {};'];
+  for (const abs of order) {
+    const m = seen.get(abs);
+    if (abs === path.resolve(entry)) {
+      parts.push(`${bindings(m)}\n${m.body}`);
+    } else {
+      parts.push(`__wodin[${key(abs)}] = (() => {\n${bindings(m)}\n${m.body}\nreturn { ${m.exports.join(', ')} };\n})();`);
+    }
+  }
+  return parts.join('\n\n');
+}
+
 function cmdRender(file) {
   const wod = readWod(file);
   const out = flag('-o', `wodin-${wod.workoutId || 'workout'}.html`);
@@ -59,8 +116,8 @@ function cmdRender(file) {
   const html = readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const tokens = readFileSync(path.join(ROOT, 'styles', 'tokens.css'), 'utf8');
   const css = readFileSync(path.join(ROOT, 'src', 'app.css'), 'utf8');
-  const icons = readFileSync(path.join(ROOT, 'src', 'icons.js'), 'utf8');
-  const js = readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
+  // A literal "</script>" in any module would end the inline block early.
+  const js = bundle(path.join(ROOT, 'src', 'main.js')).replace(/<\/script/gi, '<\\/script');
 
   // A standalone file has no directory to resolve ../fonts/ against, so the faces
   // are embedded. It roughly quadruples the file, which is the price of a single
@@ -77,8 +134,10 @@ function cmdRender(file) {
     .replace(/<link rel="stylesheet" href="styles\/fonts\.css"[^>]*>/, `<style>\n${fontCss}\n</style>`)
     .replace(/<link rel="stylesheet" href="styles\/tokens\.css"[^>]*>/, `<style>\n${tokens}\n</style>`)
     .replace(/<link rel="stylesheet" href="src\/app\.css"[^>]*>/, `<style>\n${css}\n</style>`)
+    // A function replacement: a string one would read "$&" or "$'" anywhere in
+    // the source as a substitution pattern.
     .replace(/<script type="module" src="src\/main\.js"><\/script>/,
-      `<script type="module">\n${icons.replace(/^export /m, '')}\n${js.replace(/^import .*$/m, '')}\n</script>`)
+      () => `<script type="module">\n${js}\n</script>`)
     // A file:// page has no service worker and no wods/ to fetch; the workout is baked in.
     .replace(/<script>\s*\/\/ Relative path[\s\S]*?<\/script>/, '')
     .replace('</body>', `  <script>location.hash = 'w=${encodeWod(wod)}';</script>\n</body>`);
