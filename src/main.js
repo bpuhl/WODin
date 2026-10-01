@@ -299,8 +299,6 @@ function renderWorkout() {
         <span class="eb-right">
           ${dateWithNavHtml(nice)}
           <a class="eb-link" href="?h=1">History</a>
-          <button class="btn-share" id="shareWod" type="button"
-                  aria-label="Share this workout without your submit link">${ICON.share}<span>Share</span></button>
         </span>
       </div>
       <h1>${esc(WOD.athleteTitle || WOD.title || 'Workout')}</h1>
@@ -349,6 +347,13 @@ function renderWorkout() {
         <textarea id="f-summary" placeholder="How it felt, what to remember">${esc(S.summary)}</textarea>
       </div>
       <button class="btn-log" id="log" type="button">Log workout</button>
+      <!-- Down here with Log rather than in the eyebrow (#34): it is how a
+           session leaves the phone too, and the eyebrow needs the width to
+           stay on one line on an iPhone. -->
+      <div class="share-row">
+        <button class="btn-share" id="shareWod" type="button"
+                aria-label="Share this workout without your submit link">${ICON.share}<span>Share workout</span></button>
+      </div>
     </section>
     ${footer()}`;
 
