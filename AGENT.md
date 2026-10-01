@@ -1,6 +1,6 @@
 # WODin — agent guide
 
-**Protocol version 1.2.0** · see the [changelog](#changelog) at the end.
+**Protocol version 1.3.0** · see the [changelog](#changelog) at the end.
 
 You are an agent that programs workouts for athletes at **https://wod.imav8n.com**. You write
 each athlete's workout into Object Storage; they log it on their phone; you read back what
@@ -291,9 +291,33 @@ card, with the score field under it — and the exercises below it as usual.
 |---|---|---|---|
 | `for_time` | `rounds`, optional `cap` | their time — or rounds + reps if they hit the cap | `{ "time": "9:08", "timeSec": 548 }` or `{ "capped": true, "rounds": 2, "reps": 8 }` |
 | `amrap` | `cap` (required) | rounds + reps | `{ "rounds": 5, "reps": 12 }` |
-| `intervals` | `rounds`, optional `rest` | nothing — each round's set is the data | — |
+| `intervals` | `rounds`, optional `rest`, `every` or `work` | nothing — each round's set is the data | — |
 
 All durations are `mm:ss` strings (`"cap": "12:00"`, `"rest": "1:00"`).
+
+**EMOM, Tabata and other timed intervals are `intervals`.** The athlete's gym has its own
+audible, visual timer, so the page does no timing — the card just says what that clock is
+doing:
+
+| Write | The card reads |
+|---|---|
+| `{ "kind": "intervals", "rounds": 10, "every": "1:00" }` | Every 1:00 × 10 |
+| `{ "kind": "intervals", "rounds": 8, "work": "0:20", "rest": "0:10" }` | 8 × 0:20 on / 0:10 off |
+| `{ "kind": "intervals", "rounds": 4, "rest": "1:00" }` | 4 rounds · rest 1:00 |
+
+`every` and `work` are for `intervals` only, and `every` never goes with `rest` — on the
+minute, the rest is whatever is left of it. There is no EMOM score: each minute is a round,
+logged as its own set and prefilled from your plan, so a minute the athlete missed comes back
+with the reps they actually got and `asPlanned: false`. Count those to see how many were made.
+
+```json
+{ "id": "emom", "name": "EMOM", "type": "conditioning",
+  "scheme": { "kind": "intervals", "rounds": 10, "every": "1:00" },
+  "exercises": [
+    { "movement": "Kettlebell swing", "kind": "weight_reps", "sets": [{ "reps": 12, "load": 35 }] },
+    { "movement": "Burpee", "kind": "reps", "sets": [{ "reps": 5, "loadType": "bodyweight" }] }
+  ] }
+```
 
 **Set K is round K.** Each exercise has either one set, which the page repeats every round,
 or exactly one set per round. That is how a ladder is written — there is no ladder kind:
@@ -336,9 +360,8 @@ counting from 1), which shifts whenever you add a warm-up. The rules:
   section's role (`metcon`) or the benchmark (`fran`), not the prescription — an id like
   `ladder-21-15-9` has to change the day the rep scheme does.
 
-The session clock keeps running across the whole workout; there is no per-section timer or
-EMOM yet (#38). For an EMOM today, use `intervals` with `rounds` and say "every minute" in
-the cue.
+The page's session clock keeps running across the whole workout. There is no per-section
+timer and none is planned: the gym clock does that job.
 
 ### Never invent an exercise to hold a number
 
@@ -353,7 +376,6 @@ will say when it lands.
 | Don't write | Do this for now | Tracked |
 |---|---|---|
 | `cue` on a section | the first exercise's `cue`, or `coachNote` | — |
-| `scheme.kind` `emom`, or a per-section timer | `intervals` with "every minute" in the cue | #38 |
 | `tag` on a set (`"Right"`, `"Left"`) | one set per side, sides named in the exercise `cue` | #41 |
 | `loadType` other than `bodyweight` (e.g. `"band"`) | `loadType: "bodyweight"`, band colour in the `cue` | #41 |
 
@@ -437,6 +459,11 @@ The version moves with every change to either schema or to this guide. A minor v
 (1.**1**) is additive or a clarification; a major version changes the `schema` constants
 (`wodin/wod@2`) and may break existing plans.
 
+- **1.3.0** — 2026-10-01
+  - `intervals` gains display-only `every` (EMOM) and `work` (Tabata, work/rest intervals), so
+    the card reads "Every 1:00 × 10" or "8 × 0:20 on / 0:10 off". Stop writing "every minute"
+    into cues. No new score: missed minutes show as `asPlanned: false` rounds.
+  - No section timers (#38): the gym has audible and visual ones, and that clock is the one to read.
 - **1.2.0** — 2026-10-01
   - **Scored sections** (#37): a section `scheme` of `for_time`, `amrap` or `intervals`, and
     a `scores` object in the result. See

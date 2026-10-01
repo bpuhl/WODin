@@ -4,6 +4,11 @@
  *   "scheme": { "kind": "for_time", "rounds": 3 }
  *   "scheme": { "kind": "amrap", "cap": "12:00" }
  *   "scheme": { "kind": "intervals", "rounds": 4, "rest": "1:00" }
+ *   "scheme": { "kind": "intervals", "rounds": 10, "every": "1:00" }        EMOM
+ *   "scheme": { "kind": "intervals", "rounds": 8, "work": "0:20", "rest": "0:10" }  Tabata
+ *
+ * every and work are display only (#38). The gym's own clock does the
+ * timing; the card just has to say the same thing that clock is doing.
  *
  * Set K is round K. An exercise has one set, repeated every round, or
  * exactly one set per round — which is how a 21-15-9 ladder is written,
@@ -60,6 +65,14 @@ export function schemeProblems(sec) {
   }
   if (s.cap != null && !MMSS.test(String(s.cap))) out.push(`scheme.cap "${s.cap}" is not mm:ss`);
   if (s.rest != null && !MMSS.test(String(s.rest))) out.push(`scheme.rest "${s.rest}" is not mm:ss`);
+  for (const f of ['every', 'work']) {
+    if (s[f] == null) continue;
+    if (!MMSS.test(String(s[f]))) out.push(`scheme.${f} "${s[f]}" is not mm:ss`);
+    if (s.kind !== 'intervals') out.push(`scheme.${f} is for intervals only`);
+  }
+  // On the minute, the rest is whatever is left of it: a fixed rest as
+  // well describes a different workout.
+  if (s.every != null && s.rest != null) out.push('scheme.every and scheme.rest together — an EMOM rests for what is left of the minute; use one');
   if (s.kind === 'amrap') {
     if (!s.cap) out.push('an amrap needs a cap ("12:00") — it is the whole prescription');
     if (s.rounds != null) out.push('an amrap has no rounds — rounds is what the athlete scores');
@@ -129,6 +142,8 @@ export function schemeLabel(sec) {
     const head = s.rounds > 1 ? `${s.rounds} rounds for time` : 'For time';
     return head + (s.cap ? ` · cap ${s.cap}` : '') + rest;
   }
+  if (s.every) return `Every ${s.every} × ${n}`;
+  if (s.work) return `${n} × ${s.work} on${s.rest ? ` / ${s.rest} off` : ''}`;
   return `${n} round${n === 1 ? '' : 's'}${rest}`;
 }
 
