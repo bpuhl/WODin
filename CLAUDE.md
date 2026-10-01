@@ -41,24 +41,29 @@
 - **Listeners bind once, outside `render()`.** `render()` replaces `#app`'s innerHTML but not
   the element, so binding inside it stacks a listener per render — one tap then fires all of
   them. That shipped once and added hundreds of rows per click.
-- **Every path is relative.** Prod (`/`) and PR previews (`/preview/pr-<N>/`) share one build
-  output. Don't introduce root-absolute paths; that's the bug app-template exists to avoid.
-- **The URL fragment is the transport.** `#w=` is deflate-raw + base64url, `#wj=` is plain
-  base64url JSON. A fragment never reaches a server, so workouts aren't uploaded anywhere.
-  A full session is ~1.6 KB of URL.
-- **Offline is a requirement, not a nice-to-have.** Gyms have no signal. Nothing in the
-  logging path may need the network after first load.
-- **`sink` is public**, so the documented auth pattern is a **per-workout Bearer token** —
-  bound to one `workoutId`, ~72h (athletes log late; expiry at the rack is the worst
-  failure), single use. Bearer is what GrokBot and similar hosts actually speak, so
-  steering people away from it was the wrong advice; scoping the token is the right one.
-  A leaked link then costs one forged log rather than a standing credential.
-  `wodin validate` warns on credential-shaped headers but deliberately does not fail —
-  we can't prevent it, and a hard error would just get worked around.
-- **`sink.mode: "blind"`** exists so an endpoint that knows nothing about CORS still works
-  with zero server changes — no-cors POST, no preflight, opaque response. The UI must keep
-  saying "delivery not confirmed"; never report success from a response we can't read.
-- **Never report a send failure we cannot observe.** A cors-mode `fetch` rejects identically
+- **Every path is relative.** Only `main` deploys here (no PR previews), but the app still
+  comes from app-template's one-build-any-base-path shape, and `index.html`'s SW
+  registration assumes it. Don't introduce root-absolute paths.
+- **Two ways a workout arrives.** Signed in, the app fetches `/wods/<date>.json`; the
+  server resolves the athlete from the session, never from the URL. A shared `#w=`
+  (deflate-raw + base64url) or `#wj=` (plain base64url JSON) link still works without
+  sign-in, and the fragment never reaches the server. Share strips `sink` before
+  re-encoding, so a forwarded link can't log to anyone's history. A fragment workout
+  therefore has no sink, and "Log workout" opens the Share/Copy sheet (`hasSink()` in
+  `src/submit.js`).
+- **Offline is a requirement, not a nice-to-have.** Gyms have no signal. Loading and
+  logging a workout must work with no network once it has been opened. The POST to
+  `/api/log` can't, and there is no retry queue: a failed send falls back to the
+  Share/Copy sheet so the session still gets out.
+- **This deployment's sink carries no credential.** Workouts point at
+  `https://wod.imav8n.com/api/log`; the athlete's device-key session cookie authenticates
+  it, and the server attributes the result from the session (`submittedBy` differs from
+  `athleteId` when a coach logs for someone). Upstream's per-workout Bearer token pattern
+  and `sink.mode: "blind"` (no-cors, opaque response, "delivery not confirmed") remain in
+  `AGENT.md`, the schema, and `postResult()` for workouts from other publishers. They
+  aren't used here, so don't add a token to the sink.
+- **Never report a send failure we cannot observe** (this matters for cross-origin sinks;
+  ours is same-origin). A cors-mode `fetch` rejects identically
   whether the request never left or it landed and the response merely omitted
   `Access-Control-Allow-Origin` — a very common server-side miss, since people set it on the
   preflight and forget the POST. WODin shipped claiming "Send failed" there, while payloads
