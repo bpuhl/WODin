@@ -274,6 +274,20 @@ h2 {
   font-family: var(--fd); letter-spacing: .08em; text-transform: uppercase;
 }
 .set-n.added { color: var(--accent-mute); }
+/* A label ("Right", "Left") in place of the set number — kept to the
+   column's width rather than widening it. */
+.set-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The band picker sits where the load field would, and looks like one. */
+.band-sel {
+  width: 100%; min-width: 0; min-height: var(--tap);
+  padding: 0 11px;
+  border: 0; border-radius: var(--radius);
+  background: var(--well); color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--well-edge);
+  font: inherit; font-size: 16px; font-weight: 500;
+  -webkit-appearance: none; appearance: none;
+  cursor: pointer;
+}
 .times { text-align: center; color: var(--ghost); font-size: 14px; }
 
 .btn-del {

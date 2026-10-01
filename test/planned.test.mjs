@@ -73,3 +73,22 @@ test('carry compares load, reps and distance', () => {
   assert.equal(isAsPlanned(set, { load: 50, reps: 1, distance: 100 }, 'carry'), true);
   assert.equal(isAsPlanned(set, { load: 50, reps: 1, distance: 80 }, 'carry'), false);
 });
+
+// Bands (#41). The level is the prescription, so it is compared like a
+// load: a lighter assist band is progress, and it has to show as a change.
+test('a band set done with the prescribed band is as planned', () => {
+  const set = { reps: 5, loadType: 'band-assist', band: 'hard' };
+  assert.equal(isAsPlanned(set, { reps: '5', band: 'hard' }, 'reps'), true);
+});
+
+test('a different band is a deviation, in either direction', () => {
+  const assist = { reps: 5, loadType: 'band-assist', band: 'hard' };
+  assert.equal(isAsPlanned(assist, { reps: '5', band: 'medium' }, 'reps'), false);
+  const resist = { reps: 15, loadType: 'band', band: 'light' };
+  assert.equal(isAsPlanned(resist, { reps: '15', band: 'medium' }, 'weight_reps'), false);
+});
+
+test('a band set still compares reps', () => {
+  const set = { reps: 15, loadType: 'band', band: 'light' };
+  assert.equal(isAsPlanned(set, { reps: '12', band: 'light' }, 'reps'), false);
+});
