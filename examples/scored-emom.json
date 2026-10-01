@@ -1,0 +1,55 @@
+{
+  "schema": "wodin/wod@1",
+  "workoutId": "2026-10-12",
+  "date": "2026-10-12",
+  "athleteTitle": "Brian's WOD",
+  "title": "EMOM 10",
+  "program": "Conditioning",
+  "coach": "Gainz",
+  "coachNote": "On the gym clock: start each minute on the beep. If you miss a minute, log the reps you got and keep going.",
+  "targetRpe": 8,
+  "units": {
+    "load": "lb",
+    "distance": "m"
+  },
+  "sink": {
+    "type": "post",
+    "url": "https://wod.imav8n.com/api/log"
+  },
+  "sections": [
+    {
+      "id": "emom",
+      "name": "EMOM",
+      "type": "conditioning",
+      "scheme": {
+        "kind": "intervals",
+        "rounds": 10,
+        "every": "1:00"
+      },
+      "exercises": [
+        {
+          "movement": "Kettlebell swing",
+          "kind": "weight_reps",
+          "cue": "Hips, not arms.",
+          "sets": [
+            {
+              "reps": 12,
+              "load": 35
+            }
+          ]
+        },
+        {
+          "movement": "Burpee",
+          "kind": "reps",
+          "cue": "Step back if the ankle complains.",
+          "sets": [
+            {
+              "reps": 5,
+              "loadType": "bodyweight"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

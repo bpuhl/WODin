@@ -127,6 +127,23 @@ test('the whiteboard reads like the wall', () => {
                '4 rounds · rest 1:00');
 });
 
+test('an EMOM and a Tabata read like the gym clock', () => {
+  const sec = scheme => ({ scheme, exercises: [] });
+  assert.equal(schemeLabel(sec({ kind: 'intervals', rounds: 10, every: '1:00' })), 'Every 1:00 × 10');
+  assert.equal(schemeLabel(sec({ kind: 'intervals', rounds: 8, work: '0:20', rest: '0:10' })), '8 × 0:20 on / 0:10 off');
+  assert.equal(schemeLabel(sec({ kind: 'intervals', rounds: 5, work: '0:40' })), '5 × 0:40 on');
+  // No score either way: each round's set is the data.
+  assert.equal(scoreShape({ kind: 'intervals', every: '1:00' }), null);
+});
+
+test('every and work belong to intervals, and every excludes rest', () => {
+  const sec = scheme => ({ scheme, exercises: [] });
+  assert.deepEqual(schemeProblems(sec({ kind: 'intervals', rounds: 10, every: '1:00' })), []);
+  assert.match(schemeProblems(sec({ kind: 'for_time', rounds: 3, every: '1:00' })).join(), /intervals only/);
+  assert.match(schemeProblems(sec({ kind: 'intervals', rounds: 10, every: '1:00', rest: '0:15' })).join(), /use one/);
+  assert.match(schemeProblems(sec({ kind: 'intervals', rounds: 8, work: '20s' })).join(), /not mm:ss/);
+});
+
 test('scores read as a person would say them', () => {
   assert.equal(scoreText({ time: '9:08', timeSec: 548 }), '9:08');
   assert.equal(scoreText({ rounds: 5, reps: 12 }), '5 + 12');
