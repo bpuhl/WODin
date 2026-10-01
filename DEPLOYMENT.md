@@ -132,6 +132,11 @@ Write `wods/<athlete>/<date>.json`, conforming to `wod.schema.json`.
 wods/brian/2026-09-22.json
 ```
 
+Write the plan by `AGENT.md` §1 and `wod.schema.json`. In particular, tempo,
+per-set intensity and rest go in their set fields (`tempo`, `intensity`,
+`rest` as mm:ss), not in `cue` prose: the page shows them and they stay
+comparable across sessions.
+
 One file per athlete. There is no shared workout and no fallback: if you
 do not write a file for someone, they get a clean "nothing today" rather
 than somebody else's session.

@@ -18,6 +18,7 @@ const SHELL = [
   'src/planned.js',
   'src/submit.js',
   'src/days.js',
+  'src/rx.js',
   'src/app.css',
   'styles/tokens.css',
   'styles/fonts.css',

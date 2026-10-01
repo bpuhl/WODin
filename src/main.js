@@ -12,6 +12,7 @@ import { ICON } from './icons.js';
 import { isAsPlanned } from './planned.js';
 import { hasSink, sheetActions } from './submit.js';
 import { neighbours, mostRecent } from './days.js';
+import { prescriptionNotes } from './rx.js';
 
 // Replaced by scripts/build.mjs with the same content hash the service worker
 // caches under. Shown in the library so "is this thing even updated?" is a
@@ -363,7 +364,9 @@ function renderWorkout() {
 function renderEx(ex) {
   const skipped = isSkipped(ex.id);
   const added = S.added[ex.id] || [];
-  const rows = allSets(ex).map((set, i) => renderSet(ex, set, i + 1, added.length > 0));
+  const sets = allSets(ex);
+  const rx = prescriptionNotes(sets);
+  const rows = sets.map((set, i) => renderSet(ex, set, i + 1, added.length > 0, rx.perSet[set.id]));
   const note = S.notes[ex.id] || '';
   const noteOpen = !!note || openNotes.has(ex.id);
   const rpe = S.rpes[ex.id] ?? '';
@@ -374,6 +377,7 @@ function renderEx(ex) {
       <label class="skip"><input type="checkbox" data-skip="${ex.id}" ${skipped ? 'checked' : ''}>Skip</label>
     </div>
     ${(ex.tag || ex.cue) ? `<p class="cue">${ex.tag ? `<span class="tag">${esc(ex.tag)}</span> · ` : ''}${esc(ex.cue || '')}</p>` : ''}
+    ${rxHtml(rx.shared, 'rx')}
     <div class="sets ${added.length ? 'has-added' : ''}">
       ${rows.join('')}
       <div class="pills">
@@ -394,7 +398,16 @@ function renderEx(ex) {
   </div>`;
 }
 
-function renderSet(ex, set, n, reserveDelCol) {
+/* Tempo, intensity and rest, read but never filled (#36). Said once under
+ * the cue when every set agrees, otherwise under the row that carries it. */
+function rxHtml(items, cls) {
+  if (!items || !items.length) return '';
+  return `<p class="${cls}">${items
+    .map(([label, value]) => `<span class="rx-item"><span class="rx-l">${label}</span> ${esc(value)}</span>`)
+    .join('')}</p>`;
+}
+
+function renderSet(ex, set, n, reserveDelCol, rxItems) {
   const k = ex.id + '.' + set.id;
   const v = S.sets[k] || {};
   const kind = set.kind || ex.kind || 'weight_reps';
@@ -432,7 +445,7 @@ function renderSet(ex, set, n, reserveDelCol) {
     <span class="set-n ${set._added ? 'added' : ''}">Set ${n}</span>
     ${mid}
     ${del}
-  </div>`;
+  </div>${rxHtml(rxItems, 'rx set-rx')}`;
 }
 
 /* ── render: library ─────────────────────────────────────────── */
