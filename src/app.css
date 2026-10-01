@@ -43,6 +43,9 @@ input, textarea, button { font: inherit; color: inherit; }
 .eyebrow a { color: var(--faint); text-decoration: none; }
 .eyebrow a:hover { color: var(--accent); }
 .eb-right { display: inline-flex; align-items: center; gap: 12px; }
+/* One line on a phone: "WODin" and the date wrapping onto separate lines
+   read as two headers (#34). */
+.eyebrow > *, .eb-right > * { white-space: nowrap; }
 
 .btn-share {
   display: inline-flex; align-items: center; gap: 5px;
@@ -56,6 +59,7 @@ input, textarea, button { font: inherit; color: inherit; }
 }
 .btn-share:hover { color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-mute); }
 .btn-share svg { width: 13px; height: 13px; }
+.share-row { display: flex; justify-content: center; margin-top: 14px; }
 
 h1 {
   font-family: var(--fd);
