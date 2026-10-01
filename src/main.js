@@ -13,6 +13,7 @@ import { isAsPlanned } from './planned.js';
 import { hasSink, sheetActions } from './submit.js';
 import { neighbours, mostRecent } from './days.js';
 import { prescriptionNotes } from './rx.js';
+import { expandRounds, scoreShape, buildScore, schemeLabel, scoreText, whiteboardLine } from './scheme.js';
 
 // Replaced by scripts/build.mjs with the same content hash the service worker
 // caches under. Shown in the library so "is this thing even updated?" is a
@@ -130,6 +131,8 @@ function normalise(wod) {
   let exN = 0;
   (wod.sections || []).forEach((sec, si) => {
     sec.id = sec.id || 'sec' + (si + 1);
+    // Before ids: a scored section's rounds become ordinary positional sets.
+    expandRounds(sec);
     (sec.exercises || []).forEach(ex => {
       ex.id = ex.id || 'ex' + (++exN);
       if (!ex.id.startsWith('ex')) exN++;
@@ -216,7 +219,7 @@ function seedState() {
   return {
     elapsed: 0, running: false, startedAt: null,
     rpe: '', summary: '', duration: '',
-    skipped: [], sets, notes: {}, rpes: {}, added: {}
+    skipped: [], sets, notes: {}, rpes: {}, added: {}, scores: {}
   };
 }
 
@@ -324,7 +327,8 @@ function renderWorkout() {
 
   const body = (WOD.sections || []).map(sec => `
     <div class="sec-head">${esc(sec.name)}</div>
-    ${(sec.exercises || []).map(renderEx).join('')}
+    ${sec.scheme ? renderScheme(sec) : ''}
+    ${(sec.exercises || []).map(ex => renderEx(ex, sec)).join('')}
   `).join('');
 
   // Both closing controls carry their own label — the placeholder on one, the
@@ -361,12 +365,52 @@ function renderWorkout() {
   $('app').innerHTML = head + body + close;
 }
 
-function renderEx(ex) {
+/* A scored section's whiteboard: the structure on one card, as it would be
+ * written on the wall, with the one score the section produces. The
+ * exercises below it still log round by round — prefilled from the plan,
+ * so a for-time athlete only has to touch them where a round differed. */
+function renderScheme(sec) {
+  const done = (sec.exercises || []).every(ex => isSkipped(ex.id));
+  const shape = scoreShape(sec.scheme);
+  const v = S.scores[sec.id] || {};
+  const fid = f => `score-${sec.id}-${f}`;
+
+  let score = '';
+  if (shape && !done) {
+    const rr = field({ id: fid('rounds'), val: v.rounds, unit: 'rounds', ph: '0', mode: 'numeric' })
+             + `<span class="times">+</span>`
+             + field({ id: fid('reps'), val: v.reps, unit: 'reps', ph: '0', mode: 'numeric' });
+    const capped = shape === 'time' && v.capped;
+    const inputs = shape === 'rounds_reps' || capped
+      ? `<div class="score-in k-rr">${rr}</div>`
+      : `<div class="score-in k-time">${field({ id: fid('time'), val: v.time, unit: 'mm:ss', ph: '0:00', mode: 'numeric' })}</div>`;
+    const capBox = shape === 'time' && sec.scheme.cap
+      ? `<label class="skip"><input type="checkbox" data-capped="${esc(sec.id)}" ${capped ? 'checked' : ''}>Hit the cap</label>`
+      : '';
+    score = `<div class="score">
+      <div class="score-top"><span class="fl">${shape === 'time' && !capped ? 'Your time' : 'Rounds + reps'}</span>${capBox}</div>
+      ${inputs}
+    </div>`;
+  }
+
+  return `<div class="scheme ${done ? 'skipped' : ''}">
+    <div class="scheme-label">${esc(schemeLabel(sec))}</div>
+    <ul class="wb">${(sec.exercises || [])
+      .map(ex => `<li>${esc(whiteboardLine(ex, WOD.units))}</li>`).join('')}</ul>
+    ${score}
+  </div>`;
+}
+
+function renderEx(ex, sec) {
   const skipped = isSkipped(ex.id);
   const added = S.added[ex.id] || [];
   const sets = allSets(ex);
   const rx = prescriptionNotes(sets);
-  const rows = sets.map((set, i) => renderSet(ex, set, i + 1, added.length > 0, rx.perSet[set.id]));
+  // In a scored section a row is a round, not a set, and an extra one is
+  // not something the athlete adds: the scheme fixes the rounds.
+  const scheme = sec && sec.scheme;
+  const label = !scheme ? 'Set' : scheme.kind === 'amrap' ? 'Each' : 'Rd';
+  const rows = sets.map((set, i) => renderSet(ex, set, i + 1, added.length > 0, rx.perSet[set.id], label));
   const note = S.notes[ex.id] || '';
   const noteOpen = !!note || openNotes.has(ex.id);
   const rpe = S.rpes[ex.id] ?? '';
@@ -388,7 +432,7 @@ function renderEx(ex) {
             `<option value="${n}" ${String(rpe) === String(n) ? 'selected' : ''}>RPE ${n}</option>`).join('')}
         </select>
         <button class="pill" type="button" data-opennote="${ex.id}" ${noteOpen ? 'hidden' : ''}>+ note</button>
-        <button class="pill" type="button" data-add="${ex.id}">+ set</button>
+        ${scheme ? '' : `<button class="pill" type="button" data-add="${ex.id}">+ set</button>`}
       </div>
       <div class="ex-note" data-noterow="${ex.id}" ${noteOpen ? '' : 'hidden'}>
         <textarea id="note-${ex.id}" data-note="${ex.id}"
@@ -407,7 +451,7 @@ function rxHtml(items, cls) {
     .join('')}</p>`;
 }
 
-function renderSet(ex, set, n, reserveDelCol, rxItems) {
+function renderSet(ex, set, n, reserveDelCol, rxItems, label = 'Set') {
   const k = ex.id + '.' + set.id;
   const v = S.sets[k] || {};
   const kind = set.kind || ex.kind || 'weight_reps';
@@ -442,7 +486,7 @@ function renderSet(ex, set, n, reserveDelCol, rxItems) {
       : '<span></span>';
 
   return `<div class="set k-${kind}" data-set="${k}">
-    <span class="set-n ${set._added ? 'added' : ''}">Set ${n}</span>
+    <span class="set-n ${set._added ? 'added' : ''}">${label === 'Each' ? label : `${label} ${n}`}</span>
     ${mid}
     ${del}
   </div>${rxHtml(rxItems, 'rx set-rx')}`;
@@ -639,6 +683,23 @@ function bind() {
 
     if (el.dataset && el.dataset.note) { S.notes[el.dataset.note] = el.value; return save(); }
 
+    const sc = id.match(/^score-(.+)-(time|rounds|reps)$/);
+    if (sc) {
+      const [, secId, prop] = sc;
+      let val = el.value;
+      if (prop === 'time') {
+        const before = val, pos = el.selectionStart;
+        val = fmtTime(val);
+        if (val !== before) {
+          el.value = val;
+          const shift = val.length - before.length;
+          el.setSelectionRange(pos + shift, pos + shift);
+        }
+      }
+      S.scores[secId] = { ...(S.scores[secId] || {}), [prop]: val };
+      return save();
+    }
+
     const m = id.match(/^([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)-(load|reps|distance|duration|pace)$/);
     if (!m) return;
     const [, key, prop] = m;
@@ -743,6 +804,13 @@ function bind() {
       return;
     }
 
+    const cap = e.target.dataset && e.target.dataset.capped;
+    if (cap) {
+      S.scores[cap] = { ...(S.scores[cap] || {}), capped: e.target.checked };
+      save(); renderWorkout();
+      return;
+    }
+
     const sk = e.target.dataset && e.target.dataset.skip;
     if (!sk) return;
     S.skipped = e.target.checked
@@ -812,7 +880,9 @@ function buildDigest() {
       if (note) rows.push('  ' + ' '.repeat(width) + ' ↳ ' + note);
     });
     if (!rows.length) return;
-    lines.push('', sec.name.toUpperCase(), ...rows);
+    const score = sec.scheme ? scoreText(sectionScore(sec)) : '';
+    lines.push('', sec.name.toUpperCase() + (sec.scheme ? '  · ' + schemeLabel(sec) : ''), ...rows);
+    if (score) lines.push('  Score: ' + score);
   });
 
   const skipped = eachExercise().filter(ex => isSkipped(ex.id));
@@ -825,8 +895,19 @@ function buildDigest() {
 const num = v => (v === '' || v == null) ? null : (isNaN(Number(v)) ? v : Number(v));
 
 
+/* A section's score, or null: unentered, unscored, or every exercise in
+ * it skipped. An absent score is unanswered, never zero. */
+function sectionScore(sec) {
+  if (!sec.scheme || (sec.exercises || []).every(ex => isSkipped(ex.id))) return null;
+  return buildScore(sec.scheme, S.scores[sec.id]);
+}
+
 function buildResult() {
-  const log = {}, notes = {}, exerciseRpe = {};
+  const log = {}, notes = {}, exerciseRpe = {}, scores = {};
+  (WOD.sections || []).forEach(sec => {
+    const score = sectionScore(sec);
+    if (score) scores[sec.id] = score;
+  });
 
   eachExercise().forEach(ex => {
     if (isSkipped(ex.id)) return;
@@ -870,6 +951,7 @@ function buildResult() {
     log,
     notes,
     exerciseRpe,
+    scores,
     skipped: S.skipped.slice()
   };
 }
@@ -1252,7 +1334,9 @@ function historyList(payload, back) {
       x.duration ? esc(x.duration) : null,
       x.rpe != null ? `RPE ${esc(String(x.rpe))}` : null,
       `${x.sets || 0} set${x.sets === 1 ? '' : 's'}`,
-      x.skipped ? `${x.skipped} skipped` : null
+      x.skipped ? `${x.skipped} skipped` : null,
+      // A scored section's result is the headline of the session it is in.
+      ...Object.values(x.scores || {}).map(sc => esc(scoreText(sc)))
     ].filter(Boolean).join(' · ');
     // Only worth saying when it was not the athlete themselves.
     const by = x.submittedBy && x.submittedBy !== payload.athleteId
@@ -1275,7 +1359,9 @@ function historyDetail(r, back, plan) {
   /* id -> { movement, section }, so a logged set can be shown as the
    * movement it was rather than the key it is stored under. */
   const names = {};
+  const sections = {};
   (plan ? plan.sections || [] : []).forEach(sec => {
+    sections[sec.id] = sec;
     (sec.exercises || []).forEach(ex => {
       names[ex.id] = { movement: ex.movement || ex.id, section: sec.name || '' };
     });
@@ -1318,6 +1404,15 @@ function historyDetail(r, back, plan) {
       </span></div>`;
   }).join('');
 
+  const scores = Object.entries(r.scores || {}).map(([secId, sc]) => {
+    const sec = sections[secId];
+    const what = sec ? `${esc(sec.name)} <span class="d">· ${esc(schemeLabel(sec))}</span>` : esc(secId);
+    return `<div class="lib-item"><span class="col">
+        <span class="t">${what}</span>
+        <span class="d">Score: <b>${esc(scoreText(sc))}</b></span>
+      </span></div>`;
+  }).join('');
+
   const skipped = (r.skipped || []).map(id =>
     names[id] ? esc(names[id].movement) : esc(id)).join(', ');
 
@@ -1333,6 +1428,7 @@ function historyDetail(r, back, plan) {
     <p class="d">${esc(r.workoutId)}${head ? ' · ' + head : ''}</p>
     ${by}${stale}
     ${r.athleteSummary ? `<div class="lib-empty"><p style="margin:0">${esc(r.athleteSummary)}</p></div>` : ''}
+    ${scores}
     ${blocks || `<div class="lib-empty"><p style="margin:0">Nothing logged.</p></div>`}
     ${skipped ? `<p class="d">Skipped: ${skipped}</p>` : ''}`;
 }

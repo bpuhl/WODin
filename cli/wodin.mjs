@@ -15,6 +15,7 @@ import { createServer } from 'node:http';
 import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { schemeProblems } from '../src/scheme.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const DEFAULT_BASE = 'https://beachmonkey-ai.github.io/WODin/';
@@ -253,9 +254,19 @@ function cmdValidate(files) {
       }
     }
 
+    // Section ids key the result's scores, so two sections sharing one would
+    // overwrite each other's score. Checked against the ids the page will
+    // actually use: an explicit "sec2" can collide with the positional default.
+    const secIds = (wod.sections || []).map((sec, i) => sec.id || 'sec' + (i + 1));
+    secIds.forEach((id, i) => {
+      if (secIds.indexOf(id) !== i) problems.push(`sections[${i}]: id "${id}" is already used by sections[${secIds.indexOf(id)}] — section ids must be unique within a workout`);
+      if (wod.sections[i].id && /^sec\d+$/.test(id)) warnings.push(`sections[${i}]: "${id}" looks like a positional default — pick a name ("metcon")`);
+    });
+
     (wod.sections || []).forEach((sec, i) => {
       const where = `sections[${i}]`;
       if (!sec.name) problems.push(`${where}: missing name`);
+      schemeProblems(sec).forEach(p => problems.push(`${where} (${sec.name}): ${p}`));
       (sec.exercises || []).forEach((ex, j) => {
         const exWhere = `${where}.exercises[${j}]`;
         if (!ex.movement) problems.push(`${exWhere}: missing movement`);
