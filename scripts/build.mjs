@@ -23,6 +23,9 @@ function build() {
 
   cpSync(path.join(ROOT, 'index.html'), path.join(DIST, 'index.html'));
   cpSync(path.join(ROOT, 'login.html'), path.join(DIST, 'login.html'));
+  // The agent guide, fetched by the programming agent at the start of each
+  // session — served from the build so it always matches the page.
+  cpSync(path.join(ROOT, 'AGENT.md'), path.join(DIST, 'AGENT.md'));
   cpSync(path.join(ROOT, 'styles'), path.join(DIST, 'styles'), { recursive: true });
   cpSync(path.join(ROOT, 'src'), path.join(DIST, 'src'), { recursive: true });
   cpSync(path.join(ROOT, 'public', 'manifest.webmanifest'), path.join(DIST, 'manifest.webmanifest'));

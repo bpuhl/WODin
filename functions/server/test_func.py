@@ -167,6 +167,7 @@ class TestTextStillWorks(unittest.TestCase):
                                ("styles/tokens.css", "text/css"),
                                ("manifest.webmanifest", "application/manifest+json"),
                                ("schema/wod.schema.json", "application/json"),
+                               ("AGENT.md", "text/markdown"),
                                ("public/icon.svg", "image/svg+xml")]:
             res = serve(name, b"x")
             self.assertIn(expected, res.headers["Content-Type"], name)
@@ -203,7 +204,7 @@ class TestTheGate(unittest.TestCase):
     def test_protocol_schemas_stay_public(self):
         # An agent resolves $id to these; gating them breaks the contract.
         for name in ("schema/wod.schema.json", "schema/result.schema.json",
-                     "examples/minimal.json"):
+                     "examples/minimal.json", "AGENT.md"):
             self.assertTrue(func._is_public(name), name)
 
     def test_private_things_are_not_public(self):

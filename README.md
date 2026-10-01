@@ -34,8 +34,9 @@ with no signal.
 
 | | |
 |---|---|
-| [`DEPLOYMENT.md`](DEPLOYMENT.md) | **the contract** — where the agent publishes, how it reads history, what the site serves to whom |
-| `schema/` | the two JSON documents: the plan, and the result |
+| [`AGENT.md`](AGENT.md) | **the agent guide** — versioned, served at https://wod.imav8n.com/AGENT.md; everything the programming agent needs |
+| [`DEPLOYMENT.md`](DEPLOYMENT.md) | the operator's half — buckets, what the site serves to whom, how to run it |
+| `schema/` | the two JSON documents: the plan, and the result. Their `x-version` matches AGENT.md's |
 | `functions/server/` | the OCI Function serving the site and the API |
 | `infra/` | Terraform: buckets, gateway, function, logging |
 | `scripts/` | athlete and key management, IAM bootstrap, deploy helpers |

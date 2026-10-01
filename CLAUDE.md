@@ -9,8 +9,8 @@
 - **This is a fork that diverged.** Upstream is serverless by design — the workout travels
   in the URL fragment and touches no server. This one added a backend: device-key and PIN
   sign-in, per-athlete workouts, stored history, roles. No updates are pushed or pulled.
-  `DEPLOYMENT.md` is the contract; `AGENT.md` is upstream's protocol, still correct about
-  the schemas and wrong about delivery.
+  `AGENT.md` is the agent guide for this deployment (the upstream link protocol survives
+  only as its appendix); `DEPLOYMENT.md` is the operator's half.
 - **Model:** vanilla (no bundler, no framework, no runtime deps; `sharp` is dev-only for icons)
 - **Token deviations from app-template:** `--accent` is `#cdf24a` (lime), ground is `#0d1011`
   with a faint green bias. Dark-committed on purpose — no light theme, no
@@ -60,7 +60,7 @@
   it, and the server attributes the result from the session (`submittedBy` differs from
   `athleteId` when a coach logs for someone). Upstream's per-workout Bearer token pattern
   and `sink.mode: "blind"` (no-cors, opaque response, "delivery not confirmed") remain in
-  `AGENT.md`, the schema, and `postResult()` for workouts from other publishers. They
+  the schema and `postResult()` for workouts from other publishers. They
   aren't used here, so don't add a token to the sink.
 - **Never report a send failure we cannot observe** (this matters for cross-origin sinks;
   ours is same-origin). A cors-mode `fetch` rejects identically
@@ -69,6 +69,14 @@
   preflight and forget the POST. WODin shipped claiming "Send failed" there, while payloads
   were arriving fine; a real smoke test caught it. Only `navigator.onLine === false` lets us
   say "nothing sent". Everything else that throws is "Sent — delivery not confirmed".
+
+- **The agent reads the live site, not the repo.** Gainz (the programming agent, in
+  OpenClaw) has no clone. Each session it fetches `https://wod.imav8n.com/AGENT.md` and the
+  schemas, compares `x-version`, and validates every plan before writing it to the bucket.
+  So any change to a schema or to what the page renders needs a version bump in all three
+  plus a changelog entry — `test/protocol.test.mjs` keeps the numbers in step, but only you
+  can write the entry. The schemas are `additionalProperties: false`, so adding a field the
+  agent may emit is a schema change, not just a renderer change.
 
 ## Before changing infrastructure
 
