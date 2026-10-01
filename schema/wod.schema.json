@@ -1,6 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://wod.imav8n.com/schema/wod.schema.json",
+  "x-version": "1.1.0",
+  "$comment": "x-version matches the protocol version at the top of https://wod.imav8n.com/AGENT.md; its changelog says what changed.",
   "title": "WODin workout plan",
   "description": "A prescribed workout, written by an agent and rendered as a loggable page. Everything here is the plan; what the athlete actually did comes back in result.schema.json.",
   "type": "object",
@@ -58,7 +60,7 @@
 
     "sink": {
       "type": "object",
-      "description": "Where a submitted result should go. Omit for the default, which offers share / copy / download. Everything here travels inside the link, so treat it as public.",
+      "description": "Where Log workout sends the result. On wod.imav8n.com this is always {\"type\": \"post\", \"url\": \"https://wod.imav8n.com/api/log\"} with no headers: the athlete's sign-in authenticates it. Without a sink, Log workout offers Share and Copy instead. mode and headers exist for publishers whose endpoint is on another origin; treat anything here as public, since a plan can be shared as a link.",
       "required": ["type"],
       "properties": {
         "type": { "enum": ["share", "post"] },
@@ -98,7 +100,7 @@
         "id": { "$ref": "#/$defs/id" },
         "name": { "type": "string", "description": "Shown as the section rule, e.g. \"Warm-up\"." },
         "type": {
-          "enum": ["warmup", "activation", "strength", "accessory", "conditioning", "carry", "finisher", "cooldown", "other"],
+          "enum": ["warmup", "activation", "mobility", "strength", "accessory", "conditioning", "carry", "finisher", "cooldown", "other"],
           "default": "other"
         },
         "exercises": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/exercise" } }
@@ -108,7 +110,7 @@
     "exercise": {
       "type": "object",
       "description": "One movement and its sets. The athlete's note attaches here — one per exercise, never one per set.",
-      "required": ["movement", "sets"],
+      "required": ["movement", "kind", "sets"],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/id" },
@@ -176,8 +178,8 @@
         },
 
         "athleteFills": {
-          "type": "string",
-          "description": "Names the field the athlete is expected to supply, for a partial prescription — e.g. distance and pace given, athlete fills duration.",
+          "type": ["string", "null"],
+          "description": "Names the field the athlete is expected to supply, for a partial prescription — e.g. distance and pace given, athlete fills duration. Several fields are a comma-separated list (\"load, reps\"). Null or absent means the athlete supplies nothing beyond confirming the prescription.",
           "examples": ["duration", "distance", "load", "reps"]
         },
 

@@ -84,6 +84,7 @@ _TEXT_TYPES = {
     "webmanifest": "application/manifest+json; charset=utf-8",
     "svg": "image/svg+xml; charset=utf-8",
     "txt": "text/plain; charset=utf-8",
+    "md": "text/markdown; charset=utf-8",
     "map": "application/json; charset=utf-8",
 }
 
@@ -112,6 +113,9 @@ _NEVER_CACHE = ("index.html", "sw.js", "manifest.webmanifest")
 _PUBLIC_OBJECTS = frozenset([
     "index.html", "sw.js", "manifest.webmanifest", "favicon.ico", "robots.txt",
     "login.html",
+    # The agent guide. Served from the same build as the page so an agent
+    # fetching it each session cannot be working from a stale copy.
+    "AGENT.md",
 ])
 _PUBLIC_PREFIXES = ("src/", "styles/", "fonts/", "icons/", "schema/", "examples/")
 
