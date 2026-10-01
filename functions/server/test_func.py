@@ -356,6 +356,18 @@ class TestResultCollection(unittest.TestCase):
         self.assertEqual(len(index["sessions"]), 1, "a correction must not add a row")
         self.assertEqual(index["sessions"][0]["rpe"], 7)
 
+    def test_section_scores_reach_the_index(self):
+        # Scored sections (#37): the agent reads benchmark history from the
+        # index without opening every session, so the scores must be there.
+        scored = dict(self.RESULT, scores={"metcon": {"time": "9:08", "timeSec": 548}})
+        self.post(scored)
+        row = self.body(self.history())["sessions"][0]
+        self.assertEqual(row["scores"], {"metcon": {"time": "9:08", "timeSec": 548}})
+
+    def test_a_result_without_scores_indexes_as_empty(self):
+        self.post(self.RESULT)
+        self.assertEqual(self.body(self.history())["sessions"][0]["scores"], {})
+
     def test_server_records_its_own_receipt_time_and_athlete(self):
         # A phone at the gym may have any clock at all.
         self.post(self.RESULT)

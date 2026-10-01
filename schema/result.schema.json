@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://wod.imav8n.com/schema/result.schema.json",
-  "x-version": "1.1.0",
+  "x-version": "1.2.0",
   "$comment": "x-version matches the protocol version at the top of https://wod.imav8n.com/AGENT.md; its changelog says what changed.",
   "title": "WODin workout result",
   "description": "What the athlete actually did, produced by the page and read by an agent. Pairs with a plan (wod.schema.json) via workoutId.",
@@ -59,6 +59,13 @@
       "additionalProperties": { "type": "number", "minimum": 1, "maximum": 10 }
     },
 
+    "scores": {
+      "type": "object",
+      "description": "One score per scored section (a section with a scheme), keyed by section id. A for_time section gives { time, timeSec }, or { capped: true, rounds, reps } when the cap was hit; an amrap gives { rounds, reps }. Only sections the athlete entered a score for appear — an absent key means unanswered or skipped, never zero. The section's exercises still log round by round in log, round K under set K.",
+      "propertyNames": { "pattern": "^[A-Za-z0-9_-]+$" },
+      "additionalProperties": { "$ref": "#/$defs/score" }
+    },
+
     "skipped": {
       "type": "array",
       "description": "Exercise ids the athlete marked Skip. Their sets are absent from log.",
@@ -74,6 +81,17 @@
   },
 
   "$defs": {
+    "score": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "time": { "type": "string", "examples": ["9:08"] },
+        "timeSec": { "type": "integer", "minimum": 0 },
+        "capped": { "const": true },
+        "rounds": { "type": "integer", "minimum": 0 },
+        "reps": { "type": "integer", "minimum": 0 }
+      }
+    },
     "entry": {
       "type": "object",
       "description": "One logged set. Which fields are present follows the exercise's kind.",

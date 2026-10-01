@@ -219,6 +219,29 @@ h2 {
   font-family: var(--fd); font-weight: 600; font-size: 11.5px;
   letter-spacing: .08em; text-transform: uppercase; color: var(--faint);
 }
+/* ─── Scored sections (#37) ───────────────────────────────── */
+
+/* The whiteboard: structure first, the one score last. */
+.scheme {
+  margin-top: 12px; padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.scheme.skipped { opacity: .5; }
+.scheme-label {
+  font-family: var(--fd); font-weight: 700; font-size: 17px;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--accent);
+}
+.wb { margin: 8px 0 0; padding: 0; list-style: none; }
+.wb li { font-size: 15px; color: var(--ink); line-height: 1.6; }
+.score { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.score-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.score-top .fl { margin: 0; }
+.score-in { display: grid; gap: 8px; align-items: center; }
+.score-in.k-time { grid-template-columns: minmax(0, 1fr); }
+.score-in.k-rr   { grid-template-columns: 1fr 14px 1fr; }
+
 /* Under its row, lined up with the fields rather than the "Set N" label. */
 .set-rx { margin-top: -4px; padding-left: 48px; }
 

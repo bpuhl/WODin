@@ -19,6 +19,7 @@ const SHELL = [
   'src/submit.js',
   'src/days.js',
   'src/rx.js',
+  'src/scheme.js',
   'src/app.css',
   'styles/tokens.css',
   'styles/fonts.css',

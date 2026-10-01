@@ -1,0 +1,72 @@
+{
+  "schema": "wodin/wod@1",
+  "workoutId": "2026-10-10",
+  "date": "2026-10-10",
+  "athleteTitle": "Brian's WOD",
+  "title": "21-15-9 DB Couplet",
+  "program": "Conditioning",
+  "coach": "Gainz",
+  "coachNote": "Pick a pair you could do 21 unbroken when fresh. Keep the RDL a hip hinge (soft knees), not a squat. Stop the clock at the last push press.",
+  "targetRpe": 8,
+  "units": {
+    "load": "lb",
+    "distance": "m"
+  },
+  "sink": {
+    "type": "post",
+    "url": "https://wod.imav8n.com/api/log"
+  },
+  "sections": [
+    {
+      "id": "metcon",
+      "name": "Ladder",
+      "type": "conditioning",
+      "scheme": {
+        "kind": "for_time",
+        "cap": "15:00"
+      },
+      "exercises": [
+        {
+          "movement": "Dumbbell Romanian deadlift",
+          "kind": "weight_reps",
+          "tag": "Hip hinge",
+          "cue": "Hips back, flat back, soft knees — own the range you have.",
+          "sets": [
+            {
+              "reps": 21,
+              "load": 25
+            },
+            {
+              "reps": 15,
+              "load": 25
+            },
+            {
+              "reps": 9,
+              "load": 25
+            }
+          ]
+        },
+        {
+          "movement": "Dumbbell push press",
+          "kind": "weight_reps",
+          "tag": "Overhead",
+          "cue": "Small dip, drive overhead, ribs down. Break into sets as needed.",
+          "sets": [
+            {
+              "reps": 21,
+              "load": 25
+            },
+            {
+              "reps": 15,
+              "load": 25
+            },
+            {
+              "reps": 9,
+              "load": 25
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "schema": "wodin/wod@1",
+  "workoutId": "2026-10-06",
+  "date": "2026-10-06",
+  "athleteTitle": "Brian's WOD",
+  "title": "Row + Wall Ball Couplet",
+  "program": "Conditioning",
+  "coach": "Gainz",
+  "coachNote": "Spicy but short. Right ankle: keep the wall-ball squat to a comfortable depth. Row at WORK pace, not sprint — this is a grind, not a flat-out.",
+  "targetRpe": 8,
+  "units": {
+    "load": "lb",
+    "distance": "m"
+  },
+  "sink": {
+    "type": "post",
+    "url": "https://wod.imav8n.com/api/log"
+  },
+  "sections": [
+    {
+      "id": "metcon",
+      "name": "Couplet",
+      "type": "conditioning",
+      "scheme": {
+        "kind": "for_time",
+        "rounds": 3
+      },
+      "exercises": [
+        {
+          "movement": "Row",
+          "kind": "cardio",
+          "tag": "Work pace",
+          "cue": "Steady, don't redline round 1.",
+          "sets": [
+            {
+              "distance": 300,
+              "pace": "2:15/500m",
+              "duration": null,
+              "athleteFills": "duration"
+            }
+          ]
+        },
+        {
+          "movement": "Wall ball",
+          "kind": "weight_reps",
+          "tag": "Target 9ft",
+          "cue": "Squat only as deep as the ankle allows pain-free; drive up and throw. Break into 8/7 if needed, keep moving.",
+          "sets": [
+            {
+              "reps": 15,
+              "load": 25
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

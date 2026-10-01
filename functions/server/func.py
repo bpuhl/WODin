@@ -511,6 +511,9 @@ def _summarise(result, submitted_at):
         "skipped": len(result.get("skipped") or []),
         "submittedAt": submitted_at,
         "submittedBy": result.get("submittedBy"),
+        # Scored sections (#37): the headline numbers, so an agent can read
+        # benchmark history from the index without opening every session.
+        "scores": result.get("scores") if isinstance(result.get("scores"), dict) else {},
     }
 
 

@@ -1,6 +1,6 @@
 # WODin — agent guide
 
-**Protocol version 1.1.0** · see the [changelog](#changelog) at the end.
+**Protocol version 1.2.0** · see the [changelog](#changelog) at the end.
 
 You are an agent that programs workouts for athletes at **https://wod.imav8n.com**. You write
 each athlete's workout into Object Storage; they log it on their phone; you read back what
@@ -143,6 +143,10 @@ How to read it:
    as second-hand: entered by someone who was not necessarily holding the bar.
 8. **Rowing `pace` is per 500 m.** The stored result drops the denominator — the plan says
    `"2:15/500m"`, the log says `"2:15"`. See §6.
+9. **`scores` holds one result per scored section**, keyed by section id — see
+   [Scored sections](#scored-sections-rounds-for-time-amrap-intervals). `_index.json` carries
+   them too, so benchmark history is one read. An absent key means unanswered or skipped,
+   never zero.
 
 ---
 
@@ -262,12 +266,84 @@ you want to know whether the tempo was held, ask in the cue and read the exercis
 
 A movement appearing twice in one session (warm-up row, finisher row) is fine.
 
+### Scored sections: rounds, for time, AMRAP, intervals
+
+Give a section a `scheme` when its movements are done together, in rounds, and the athlete
+logs one score for the whole thing. The page draws it as a whiteboard — the structure on one
+card, with the score field under it — and the exercises below it as usual.
+
+```json
+{
+  "id": "metcon",
+  "name": "Couplet",
+  "type": "conditioning",
+  "scheme": { "kind": "for_time", "rounds": 3 },
+  "exercises": [
+    { "movement": "Row", "kind": "cardio",
+      "sets": [{ "distance": 300, "pace": "2:15/500m", "duration": null, "athleteFills": "duration" }] },
+    { "movement": "Wall ball", "kind": "weight_reps",
+      "sets": [{ "reps": 15, "load": 25 }] }
+  ]
+}
+```
+
+| `kind` | Fields | The athlete scores | In `scores` |
+|---|---|---|---|
+| `for_time` | `rounds`, optional `cap` | their time — or rounds + reps if they hit the cap | `{ "time": "9:08", "timeSec": 548 }` or `{ "capped": true, "rounds": 2, "reps": 8 }` |
+| `amrap` | `cap` (required) | rounds + reps | `{ "rounds": 5, "reps": 12 }` |
+| `intervals` | `rounds`, optional `rest` | nothing — each round's set is the data | — |
+
+All durations are `mm:ss` strings (`"cap": "12:00"`, `"rest": "1:00"`).
+
+**Set K is round K.** Each exercise has either one set, which the page repeats every round,
+or exactly one set per round. That is how a ladder is written — there is no ladder kind:
+
+```json
+{ "id": "metcon", "name": "Ladder", "type": "conditioning",
+  "scheme": { "kind": "for_time", "cap": "15:00" },
+  "exercises": [
+    { "movement": "Dumbbell Romanian deadlift", "kind": "weight_reps",
+      "sets": [{ "reps": 21, "load": 25 }, { "reps": 15, "load": 25 }, { "reps": 9, "load": 25 }] },
+    { "movement": "Dumbbell push press", "kind": "weight_reps",
+      "sets": [{ "reps": 21, "load": 25 }, { "reps": 15, "load": 25 }, { "reps": 9, "load": 25 }] }
+  ] }
+```
+
+With per-round sets, leave `rounds` out — the set count is the round count. Movements may
+ladder differently, and load may change per rung.
+
+An **AMRAP** exercise has exactly one set, the round's prescription, and never `rounds` —
+rounds is what the athlete scores.
+
+What comes back:
+
+- `scores.<sectionId>` — the section's one score, shaped as in the table.
+- `log` — every round of every movement as an ordinary set: round 2 of the wall ball is
+  `ex2.s2`. Prefilled from your plan, so it reads `asPlanned: true` unless the athlete changed
+  a round. **The movements stay in movement history**, round by round, so a row split per round
+  is there when the athlete records it. An AMRAP logs each movement once, as prescribed.
+
+**Set the section `id`** (`"metcon"`, `"engine"`). The default is positional (`sec1`, `sec2` —
+counting from 1), which shifts whenever you add a warm-up. The rules:
+
+- **Characters:** letters, digits, `-` and `_` (`^[A-Za-z0-9_-]+$`), 1–32 long. Case-sensitive.
+- **Unique within the workout.** Scores are keyed by it, so two sections sharing an id would
+  overwrite each other. Ids only need to be unique inside one plan, not across workouts or
+  athletes.
+- **Don't use the `sec<N>` form yourself** — it can collide with a positional default.
+- **Reuse an id to make scores comparable.** Nothing matches across sessions for you; if you
+  want to compare this week's couplet with last week's, give both the same id. Name the
+  section's role (`metcon`) or the benchmark (`fran`), not the prescription — an id like
+  `ladder-21-15-9` has to change the day the rep scheme does.
+
+The session clock keeps running across the whole workout; there is no per-section timer or
+EMOM yet (#38). For an EMOM today, use `intervals` with `rounds` and say "every minute" in
+the cue.
+
 ### Never invent an exercise to hold a number
 
 Do not add a pseudo-exercise such as "Total time" as a place to log a score. It pollutes the
-movement history with something that is not a movement. Until scored sections exist (#37,
-planned), ask for the score in the section's last exercise cue and read it from that
-exercise's note — or from `athleteSummary`.
+movement history with something that is not a movement. Use a scored section.
 
 ### Not supported yet — don't use
 
@@ -276,7 +352,8 @@ will say when it lands.
 
 | Don't write | Do this for now | Tracked |
 |---|---|---|
-| `scheme`, `cue` on a section | rounds and scoring in the first exercise's `cue` | #37 |
+| `cue` on a section | the first exercise's `cue`, or `coachNote` | — |
+| `scheme.kind` `emom`, or a per-section timer | `intervals` with "every minute" in the cue | #38 |
 | `tag` on a set (`"Right"`, `"Left"`) | one set per side, sides named in the exercise `cue` | #41 |
 | `loadType` other than `bodyweight` (e.g. `"band"`) | `loadType: "bodyweight"`, band colour in the `cue` | #41 |
 
@@ -360,6 +437,14 @@ The version moves with every change to either schema or to this guide. A minor v
 (1.**1**) is additive or a clarification; a major version changes the `schema` constants
 (`wodin/wod@2`) and may break existing plans.
 
+- **1.2.0** — 2026-10-01
+  - **Scored sections** (#37): a section `scheme` of `for_time`, `amrap` or `intervals`, and
+    a `scores` object in the result. See
+    [Scored sections](#scored-sections-rounds-for-time-amrap-intervals).
+  - `_index.json` sessions carry `scores`.
+  - Ids (section, exercise, set) are at most 32 characters; section ids must be unique within
+    a workout (`wodin validate` checks).
+  - Section `cue` is still not supported; `emom` is tracked in #38.
 - **1.1.0** — 2026-10-01
   - `tempo`, `intensity` and `rest` are now displayed (they were always valid, never shown).
     Use them instead of writing tempo or rest into `cue`. `rest` is `mm:ss`.
