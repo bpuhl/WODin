@@ -81,28 +81,31 @@
           "movement": "Row",
           "kind": "cardio",
           "tag": "Engine",
-          "cue": "4 × 500m, 2:00 rest between. Target split is the whole point — log the time you actually held.",
+          "cue": "Target split is the whole point — log the time you actually held.",
           "sets": [
             {
               "id": "s1",
               "distance": 500,
               "pace": "1:55/500m",
               "duration": null,
-              "athleteFills": "duration"
+              "athleteFills": "duration",
+              "rest": "2:00"
             },
             {
               "id": "s2",
               "distance": 500,
               "pace": "1:55/500m",
               "duration": null,
-              "athleteFills": "duration"
+              "athleteFills": "duration",
+              "rest": "2:00"
             },
             {
               "id": "s3",
               "distance": 500,
               "pace": "1:55/500m",
               "duration": null,
-              "athleteFills": "duration"
+              "athleteFills": "duration",
+              "rest": "2:00"
             },
             {
               "id": "s4",

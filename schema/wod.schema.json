@@ -157,14 +157,23 @@
           "enum": ["bodyweight"],
           "description": "Use instead of load:0 for unweighted work. Renders as \"BW\"."
         },
-        "tempo": { "type": ["string", "null"], "examples": ["3-1-1-0"] },
-        "rest": { "type": ["string", "null"], "examples": ["90s", "2:00"] },
+        "tempo": {
+          "type": ["string", "null"], "examples": ["3-1-1-0", "30X1"],
+          "description": "Shown to the athlete, never filled or compared. Write it here rather than in cue, so it stays data."
+        },
+        "rest": {
+          "type": ["string", "null"], "examples": ["1:30", "2:00"],
+          "description": "Rest after this set, mm:ss like every other duration. Shown to the athlete, never filled or compared. \"90s\" is still read and shown as 1:30."
+        },
 
         "duration": { "type": ["string", "null"], "examples": ["0:20", "3:00"], "description": "mm:ss or h:mm:ss." },
         "distance": { "type": ["number", "null"], "minimum": 0 },
         "distanceUnit": { "type": "string", "description": "Overrides units.distance for this row — a carry in ft alongside a row in m." },
         "pace": { "type": ["string", "null"], "examples": ["2:00/500m"], "description": "Value and denominator together; the denominator becomes the field's unit suffix." },
-        "intensity": { "type": ["string", "null"], "examples": ["RPE 8", "75%", "Z2"] },
+        "intensity": {
+          "type": ["string", "null"], "examples": ["RPE 8", "75%", "Z2"],
+          "description": "Per-set effort target. Shown to the athlete, never filled or compared — distinct from the session-level targetRpe."
+        },
 
         "athleteFills": {
           "type": "string",

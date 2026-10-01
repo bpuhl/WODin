@@ -90,6 +90,24 @@ Give what you're prescribing, leave the rest null, and name what the athlete sup
 { "distance": 500, "pace": "2:00/500m", "duration": null, "athleteFills": "duration" }
 ```
 
+### Tempo, intensity and rest
+
+Three set fields are prescription the athlete reads but never fills. Put them in the set,
+not in `cue`, so they stay data you can compare across sessions:
+
+```json
+{ "reps": 8, "load": 135, "tempo": "3-1-1-0", "intensity": "RPE 8", "rest": "2:00" }
+```
+
+- `tempo` — any notation you like (`3-1-1-0`, `30X1`); it is shown as written.
+- `intensity` — a per-set target (`RPE 8`, `75%`, `Z2`). The session-wide one is `targetRpe`.
+- `rest` — after this set, `mm:ss`.
+
+When every set of an exercise carries the same value, the page says it once under the cue;
+when they differ, it shows each under its own row. None of them is logged back or counted
+against `asPlanned` — the result tells you what was lifted, not whether the tempo was held.
+If you want to know that, ask in the cue and read the exercise note.
+
 ### Name movements canonically
 
 `movement` is the exercise's name and nothing else. **"Row", not "Easy row" or "Row 500m".**
