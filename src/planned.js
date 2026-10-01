@@ -16,6 +16,13 @@ function filledByAthlete(set) {
   );
 }
 
+/* A band is the resistance (pull-aparts) or the assistance (banded
+ * pull-ups). Either way the level is the prescription, so it is compared
+ * like a load: a lighter assist band is the progress an agent wants to
+ * see, and it only shows up as a deviation if it is compared. */
+export const BAND_TYPES = ['band', 'band-assist'];
+export const isBand = set => BAND_TYPES.includes(set && set.loadType);
+
 export function isAsPlanned(set, v, kind) {
   if (set._added) return false;
 
@@ -31,6 +38,12 @@ export function isAsPlanned(set, v, kind) {
    * effect was to report every interval of a perfectly executed session
    * as off-plan. */
   const matches = (field, actual, planned) => fills.has(field) || same(actual, planned);
+
+  if (isBand(set)) {
+    const bandOk = matches('band', v.band, set.band);
+    if (kind === 'weight_reps' || kind === 'reps') return bandOk && matches('reps', v.reps, set.reps);
+    return bandOk;
+  }
 
   const loadOk = set.loadType === 'bodyweight'
     ? (fills.has('load') || v.load === 'BW')

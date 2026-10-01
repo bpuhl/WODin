@@ -346,6 +346,11 @@ function cmdValidate(files) {
         if (!Array.isArray(ex.sets) || !ex.sets.length) problems.push(`${exWhere} (${ex.movement}): no sets`);
         (ex.sets || []).forEach((set, k) => {
           if (set.load === 0) problems.push(`${exWhere}.sets[${k}]: load 0 — use "loadType": "bodyweight"`);
+          const banded = set.loadType === 'band' || set.loadType === 'band-assist';
+          if (banded && !['light', 'medium', 'hard'].includes(set.band)) problems.push(`${exWhere}.sets[${k}]: loadType "${set.loadType}" needs "band": light, medium or hard`);
+          if (!banded && set.band != null) problems.push(`${exWhere}.sets[${k}]: "band" without loadType band or band-assist`);
+          if (banded && !['weight_reps', 'reps'].includes(set.kind || ex.kind)) warnings.push(`${exWhere}.sets[${k}]: a band is drawn only for kinds weight_reps and reps`);
+          if (set.label != null && String(set.label).length > 8) problems.push(`${exWhere}.sets[${k}]: label "${set.label}" is over 8 characters — it replaces "Set 1" in a narrow column`);
         });
       });
     });

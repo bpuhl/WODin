@@ -29,6 +29,15 @@ test('a single set is repeated for every round, as ordinary positional sets', ()
   assert.notEqual(wallBall.sets[0], wallBall.sets[1]);
 });
 
+test('a scheme the page does not understand is dropped, not drawn', () => {
+  // A live workout from before #37 carries free text here.
+  const sec = expandRounds({ scheme: '3 rounds for time',
+    exercises: [{ movement: 'Row', sets: [{ distance: 300 }] }] });
+  assert.equal(sec.scheme, undefined);
+  assert.equal(sec.exercises[0].sets.length, 1, 'nothing expanded');
+  assert.equal(expandRounds({ scheme: { kind: 'emom' }, exercises: [] }).scheme, undefined);
+});
+
 test('expanding twice changes nothing', () => {
   const once = expandRounds(metcon('for-time'));
   const twice = expandRounds(structuredClone(once));
@@ -142,6 +151,14 @@ test('every and work belong to intervals, and every excludes rest', () => {
   assert.match(schemeProblems(sec({ kind: 'for_time', rounds: 3, every: '1:00' })).join(), /intervals only/);
   assert.match(schemeProblems(sec({ kind: 'intervals', rounds: 10, every: '1:00', rest: '0:15' })).join(), /use one/);
   assert.match(schemeProblems(sec({ kind: 'intervals', rounds: 8, work: '20s' })).join(), /not mm:ss/);
+});
+
+test('a band reads as its level on the whiteboard', () => {
+  const units = { load: 'lb' };
+  assert.equal(whiteboardLine({ movement: 'Band pull-apart', kind: 'reps',
+    sets: [{ reps: 15, loadType: 'band', band: 'light' }] }, units), '15 Band pull-apart · light band');
+  assert.equal(whiteboardLine({ movement: 'Pull-up', kind: 'weight_reps',
+    sets: [{ reps: 5, loadType: 'band-assist', band: 'medium' }] }, units), '5 Pull-up · medium assist band');
 });
 
 test('scores read as a person would say them', () => {

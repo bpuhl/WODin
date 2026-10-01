@@ -1,6 +1,6 @@
 # WODin — agent guide
 
-**Protocol version 1.3.0** · see the [changelog](#changelog) at the end.
+**Protocol version 1.4.0** · see the [changelog](#changelog) at the end.
 
 You are an agent that programs workouts for athletes at **https://wod.imav8n.com**. You write
 each athlete's workout into Object Storage; they log it on their phone; you read back what
@@ -216,6 +216,44 @@ It decides which fields are drawn, and it cannot be inferred — a field the ath
 
 For unweighted work use `"loadType": "bodyweight"`, never `"load": 0`. It renders as `BW`.
 
+### Bands
+
+A band is either the resistance or the help, and progress runs opposite ways — so they are
+two load types:
+
+| `loadType` | The band… | e.g. | Progress is |
+|---|---|---|---|
+| `"band"` | resists | band pull-apart | a harder band |
+| `"band-assist"` | helps | banded pull-up | a lighter band |
+
+Both need `band`: `"light"`, `"medium"` or `"hard"`. That is the athlete's own scale — they
+know which colour is which; name the colour in the cue if it helps at the rack, never in the
+data. No `load`.
+
+```json
+{ "movement": "Pull-up", "kind": "reps",
+  "sets": [{ "reps": 5, "loadType": "band-assist", "band": "hard" }] }
+```
+
+Use kind `reps` or `weight_reps`; the page draws a light/medium/hard picker where the load
+would go, set to your prescription. The result records the band actually used —
+`{ "reps": 5, "loadType": "band-assist", "band": "medium", "asPlanned": false }` — and a
+different band is a deviation, like a different weight. There is no "bodyweight minus a band"
+figure: the band is the data.
+
+### Set labels
+
+For unilateral work, give each side its own set and a `label`; it replaces "Set 1" on the row:
+
+```json
+"sets": [{ "label": "Right", "reps": 15, "loadType": "bodyweight" },
+         { "label": "Left",  "reps": 15, "loadType": "bodyweight" }]
+```
+
+At most 8 characters (`"R strt"`, `"L bent"` for a two-position stretch). Display only — not
+logged; the result is still keyed `ex1.s1`, `ex1.s2`, in the order you wrote them. In a scored
+section a label replaces "Rd 1" the same way.
+
 ### Partial prescriptions: `athleteFills`
 
 Give what you're prescribing, leave the rest null, and name what the athlete supplies:
@@ -376,8 +414,7 @@ will say when it lands.
 | Don't write | Do this for now | Tracked |
 |---|---|---|
 | `cue` on a section | the first exercise's `cue`, or `coachNote` | — |
-| `tag` on a set (`"Right"`, `"Left"`) | one set per side, sides named in the exercise `cue` | #41 |
-| `loadType` other than `bodyweight` (e.g. `"band"`) | `loadType: "bodyweight"`, band colour in the `cue` | #41 |
+| `tag` on a set | `label` ([Set labels](#set-labels)) — `tag` is the exercise's classifier | — |
 
 ### What goes where
 
@@ -459,6 +496,12 @@ The version moves with every change to either schema or to this guide. A minor v
 (1.**1**) is additive or a clarification; a major version changes the `schema` constants
 (`wodin/wod@2`) and may break existing plans.
 
+- **1.4.0** — 2026-10-01
+  - **Bands** (#41): `loadType` `"band"` (resistance) and `"band-assist"` (assistance), each
+    with `band`: `light` / `medium` / `hard`. Logged as the band actually used and compared
+    for `asPlanned`. See [Bands](#bands).
+  - **Set labels** (#41): `label` on a set, up to 8 characters, replaces "Set 1". Use it
+    instead of `tag` for Right / Left. See [Set labels](#set-labels).
 - **1.3.0** — 2026-10-01
   - `intervals` gains display-only `every` (EMOM) and `work` (Tabata, work/rest intervals), so
     the card reads "Every 1:00 × 10" or "8 × 0:20 on / 0:10 off". Stop writing "every minute"

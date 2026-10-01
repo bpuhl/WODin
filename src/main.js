@@ -9,7 +9,7 @@
  */
 
 import { ICON } from './icons.js';
-import { isAsPlanned } from './planned.js';
+import { isAsPlanned, isBand } from './planned.js';
 import { hasSink, sheetActions } from './submit.js';
 import { neighbours, mostRecent } from './days.js';
 import { prescriptionNotes } from './rx.js';
@@ -210,6 +210,7 @@ function seedState() {
   eachExercise().forEach(ex => ex.sets.forEach(set => {
     sets[ex.id + '.' + set.id] = {
       load:     set.loadType === 'bodyweight' ? 'BW' : numStr(set.load),
+      band:     isBand(set) ? (set.band || '') : undefined,
       reps:     numStr(set.reps),
       distance: numStr(set.distance),
       duration: set.duration ?? '',
@@ -457,8 +458,24 @@ function renderSet(ex, set, n, reserveDelCol, rxItems, label = 'Set') {
   const kind = set.kind || ex.kind || 'weight_reps';
   const dUnit = set.distanceUnit || unitOf('distance');
 
+  /* A band replaces the load field with its level — light, medium or hard,
+   * the athlete's own scale. Prefilled with the prescription; changing it
+   * is a real deviation (a lighter assist band is progress), so it is a
+   * picker rather than a label. Drawn for weight_reps and reps alike. */
+  const band = isBand(set) && (kind === 'weight_reps' || kind === 'reps');
+  const bandSel = () => `<select class="band-sel" id="${k}-band"
+      aria-label="${set.loadType === 'band-assist' ? 'Assist band' : 'Band'}, set ${n}">
+      ${v.band ? '' : '<option value="" selected>Band?</option>'}
+      ${['light', 'medium', 'hard'].map(b =>
+        `<option value="${b}" ${v.band === b ? 'selected' : ''}>${b[0].toUpperCase() + b.slice(1)}${set.loadType === 'band-assist' ? ' assist' : ''}</option>`).join('')}
+    </select>`;
+
   let mid = '';
-  if (kind === 'weight_reps') {
+  if (band) {
+    mid = bandSel()
+        + `<span class="times">×</span>`
+        + field({ id: k + '-reps', val: v.reps, unit: 'reps', mode: 'numeric' });
+  } else if (kind === 'weight_reps') {
     const bw = v.load === 'BW';
     mid = field({ id: k + '-load', val: v.load, unit: bw ? '' : unitOf('load'), ph: unitOf('load'), cls: bw ? 'bw' : '' })
         + `<span class="times">×</span>`
@@ -485,8 +502,10 @@ function renderSet(ex, set, n, reserveDelCol, rxItems, label = 'Set') {
       ? `<button class="btn-del" type="button" data-del="${k}" aria-label="Remove added set ${n}">×</button>`
       : '<span></span>';
 
-  return `<div class="set k-${kind}" data-set="${k}">
-    <span class="set-n ${set._added ? 'added' : ''}">${label === 'Each' ? label : `${label} ${n}`}</span>
+  // A plan's own label ("Right", "Left") says more than a number (#41).
+  const name = set.label ? esc(set.label) : label === 'Each' ? label : `${label} ${n}`;
+  return `<div class="set k-${band ? 'weight_reps' : kind}" data-set="${k}">
+    <span class="set-n ${set._added ? 'added' : ''}">${name}</span>
     ${mid}
     ${del}
   </div>${rxHtml(rxItems, 'rx set-rx')}`;
@@ -700,7 +719,7 @@ function bind() {
       return save();
     }
 
-    const m = id.match(/^([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)-(load|reps|distance|duration|pace)$/);
+    const m = id.match(/^([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)-(load|reps|distance|duration|pace|band)$/);
     if (!m) return;
     const [, key, prop] = m;
     let val = el.value;
@@ -854,6 +873,9 @@ function setValues(ex, set) {
   const kind = set.kind || ex.kind || 'weight_reps';
   const dUnit = set.distanceUnit || unitOf('distance');
 
+  if (isBand(set) && (kind === 'weight_reps' || kind === 'reps')) {
+    return `${v.band || '—'}${set.loadType === 'band-assist' ? ' assist' : ''} band×${v.reps || '—'}`;
+  }
   if (kind === 'weight_reps') return `${v.load || '—'}×${v.reps || '—'}`;
   if (kind === 'reps')        return `${v.reps || '—'}`;
   if (kind === 'time')        return `${v.duration || '—'}`;
@@ -921,7 +943,12 @@ function buildResult() {
       const kind = set.kind || ex.kind || 'weight_reps';
       const entry = {};
 
-      if (kind === 'weight_reps' || kind === 'carry') {
+      // A band records its type and the level actually used — no load,
+      // and never "bodyweight minus a band": that arithmetic is the agent's.
+      if (isBand(set) && (kind === 'weight_reps' || kind === 'reps')) {
+        entry.loadType = set.loadType;
+        entry.band = v.band || null;
+      } else if (kind === 'weight_reps' || kind === 'carry') {
         if (v.load === 'BW') entry.loadType = 'bodyweight';
         else entry.load = num(v.load);
       }
@@ -1379,7 +1406,8 @@ function historyDetail(r, back, plan) {
 
   const fmt = v => {
     const bits = [];
-    if (v.load === 'BW') bits.push('BW');
+    if (v.band) bits.push(`${esc(v.band)} ${v.loadType === 'band-assist' ? 'assist band' : 'band'}`);
+    if (v.load === 'BW' || v.loadType === 'bodyweight') bits.push('BW');
     else if (v.load != null) bits.push(`${esc(String(v.load))}`);
     if (v.reps != null) bits.push(`× ${esc(String(v.reps))}`);
     if (v.distance != null) bits.push(`${esc(String(v.distance))} m`);

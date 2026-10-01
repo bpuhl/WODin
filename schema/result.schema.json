@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://wod.imav8n.com/schema/result.schema.json",
-  "x-version": "1.3.0",
+  "x-version": "1.4.0",
   "$comment": "x-version matches the protocol version at the top of https://wod.imav8n.com/AGENT.md; its changelog says what changed.",
   "title": "WODin workout result",
   "description": "What the athlete actually did, produced by the page and read by an agent. Pairs with a plan (wod.schema.json) via workoutId.",
@@ -99,7 +99,8 @@
       "properties": {
         "reps": { "type": ["number", "null"] },
         "load": { "type": ["number", "string", "null"], "description": "Number in the plan's load unit. A string only when the athlete typed something non-numeric." },
-        "loadType": { "enum": ["bodyweight"], "description": "Present instead of load for unweighted work." },
+        "loadType": { "enum": ["bodyweight", "band", "band-assist"], "description": "Present instead of load for unweighted or banded work. band-assist means the band helped; a lighter one is progress." },
+        "band": { "enum": ["light", "medium", "hard", null], "description": "The band level actually used, with loadType band or band-assist. Compared against the plan's band for asPlanned." },
 
         "duration": { "type": ["string", "null"], "examples": ["1:58"] },
         "durationSec": { "type": ["integer", "null"], "minimum": 0 },

@@ -38,6 +38,13 @@ export function roundCount(sec) {
  * positional rule as every other set (s1, s2 …), so a result reads back
  * against the plan without knowing a scheme was involved. */
 export function expandRounds(sec) {
+  // A scheme this page does not understand is no scheme at all. Workouts
+  // written before #37 carry free text here ("3 rounds for time"), and
+  // drawing a scored card from that would invent a structure nobody
+  // prescribed. The section then renders as it always did.
+  if (sec && sec.scheme && !(typeof sec.scheme === 'object' && SCHEME_KINDS.includes(sec.scheme.kind))) {
+    delete sec.scheme;
+  }
   const n = roundCount(sec);
   if (!n) return sec;
   (sec.exercises || []).forEach(ex => {
@@ -171,8 +178,15 @@ export function whiteboardLine(ex, units) {
   const loadUnit = (units && units.load) || 'lb';
   const distUnit = (sets[0] && sets[0].distanceUnit) || (units && units.distance) || 'm';
   const bw = sets.every(s => s.loadType === 'bodyweight');
-  const load = bw ? '' : join('load');
-  const atLoad = load ? ` @ ${load} ${loadUnit}` : '';
+  const band = sets.every(s => s.loadType === 'band' || s.loadType === 'band-assist');
+  const load = bw || band ? '' : join('load');
+  let atLoad = load ? ` @ ${load} ${loadUnit}` : '';
+  if (band) {
+    const level = join('band');
+    const assist = sets[0].loadType === 'band-assist';
+    atLoad = level ? ` · ${level} ${assist ? 'assist band' : 'band'}` : '';
+    if (kind === 'reps') return `${join('reps')} ${ex.movement}${atLoad}`.trim();
+  }
 
   let lead = '';
   if (kind === 'cardio' || kind === 'carry') {

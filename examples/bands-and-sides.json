@@ -1,0 +1,114 @@
+{
+  "schema": "wodin/wod@1",
+  "workoutId": "2026-10-14",
+  "date": "2026-10-14",
+  "athleteTitle": "Brian's WOD",
+  "title": "Pull + Ankle",
+  "coach": "Gainz",
+  "coachNote": "Assist band: drop a level only when every rep is clean.",
+  "units": {
+    "load": "lb",
+    "distance": "m"
+  },
+  "sink": {
+    "type": "post",
+    "url": "https://wod.imav8n.com/api/log"
+  },
+  "sections": [
+    {
+      "name": "Mobility",
+      "type": "mobility",
+      "exercises": [
+        {
+          "movement": "Knee-to-wall ankle rock",
+          "kind": "reps",
+          "cue": "Right side is the stiff one — slow and controlled.",
+          "sets": [
+            {
+              "label": "Right",
+              "reps": 15,
+              "loadType": "bodyweight"
+            },
+            {
+              "label": "Left",
+              "reps": 15,
+              "loadType": "bodyweight"
+            }
+          ]
+        },
+        {
+          "movement": "Calf stretch",
+          "kind": "time",
+          "cue": "Straight knee, then bent.",
+          "sets": [
+            {
+              "label": "R strt",
+              "duration": "0:45"
+            },
+            {
+              "label": "R bent",
+              "duration": "0:45"
+            },
+            {
+              "label": "L strt",
+              "duration": "0:45"
+            },
+            {
+              "label": "L bent",
+              "duration": "0:45"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Pull",
+      "type": "strength",
+      "exercises": [
+        {
+          "movement": "Pull-up",
+          "kind": "reps",
+          "tag": "Banded",
+          "cue": "Full hang to chin over bar.",
+          "sets": [
+            {
+              "reps": 5,
+              "loadType": "band-assist",
+              "band": "hard",
+              "rest": "2:00"
+            },
+            {
+              "reps": 5,
+              "loadType": "band-assist",
+              "band": "hard",
+              "rest": "2:00"
+            },
+            {
+              "reps": 5,
+              "loadType": "band-assist",
+              "band": "medium",
+              "rest": "2:00"
+            }
+          ]
+        },
+        {
+          "movement": "Band pull-apart",
+          "kind": "reps",
+          "cue": "Arms straight, squeeze the blades.",
+          "sets": [
+            {
+              "reps": 15,
+              "loadType": "band",
+              "band": "light"
+            },
+            {
+              "reps": 15,
+              "loadType": "band",
+              "band": "light"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
