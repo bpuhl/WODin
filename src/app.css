@@ -13,8 +13,11 @@ body {
 .wrap {
   max-width: 480px;
   margin: 0 auto;
-  padding-inline: 16px;
-  padding-block: 20px calc(120px + env(safe-area-inset-bottom));
+  /* Installed on iOS the page runs under a translucent status bar
+     (viewport-fit=cover + black-translucent), so it has to clear the
+     clock and Dynamic Island itself. In a browser tab every inset is 0. */
+  padding-inline: calc(16px + env(safe-area-inset-left)) calc(16px + env(safe-area-inset-right));
+  padding-block: calc(20px + env(safe-area-inset-top)) calc(120px + env(safe-area-inset-bottom));
 }
 
 input, textarea, button { font: inherit; color: inherit; }
@@ -634,7 +637,7 @@ h2 {
 }
 
 .toast {
-  position: fixed; left: 50%; bottom: 26px; translate: -50% 0;
+  position: fixed; left: 50%; bottom: calc(26px + env(safe-area-inset-bottom)); translate: -50% 0;
   z-index: 60;
   padding: 11px 18px; border-radius: 999px;
   background: var(--accent); color: var(--on-accent);
