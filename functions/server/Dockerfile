@@ -1,11 +1,19 @@
-FROM fnproject/python:3.9-dev as build-stage
+# Base images pinned by digest, not tag. On 2026-10-06 the public
+# fnproject/python:3.9 and 3.9-dev tags were republished, and the new -dev
+# image points pip at an Oracle-internal index
+# (artifactory-builds.oci.oraclecorp.com) that does not resolve from the
+# internet, so every build fails at `pip3 install`. Pulse hit it first;
+# these are the digests its last good build (2026-10-03) used, still
+# served by Docker Hub. Bump deliberately, after checking a new image
+# builds. See ~/projects/PATTERNS.md.
+FROM fnproject/python:3.9-dev@sha256:456b169161bb8423265441a4f996ad49d01cf159c6cfa82456c767c185b3b259 AS build-stage
 WORKDIR /function
 ADD requirements.txt /function/
 RUN pip3 install --target /python/ --no-cache-dir -r requirements.txt
 ADD . /function/
 RUN rm -fr /function/.pip_cache
 
-FROM fnproject/python:3.9
+FROM fnproject/python:3.9@sha256:70a04e1e284767b6618a2997cb647e4026a53f8b4fbf3692c8b6d8fd031920f8
 WORKDIR /function
 COPY --from=build-stage /python /python
 COPY --from=build-stage /function /function
