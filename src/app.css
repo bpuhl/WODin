@@ -20,6 +20,16 @@ body {
   padding-block: calc(20px + env(safe-area-inset-top)) calc(120px + env(safe-area-inset-bottom));
 }
 
+/* Installed on iOS, the status bar is translucent over the page: a strip of
+   ground colour behind it stops scrolled content showing through the clock.
+   Zero height in a browser tab. */
+body::before {
+  content: ''; position: fixed; top: 0; left: 0; right: 0; z-index: 30;
+  height: env(safe-area-inset-top);
+  background: var(--ground);
+  pointer-events: none;
+}
+
 input, textarea, button { font: inherit; color: inherit; }
 
 :focus-visible {
@@ -119,7 +129,8 @@ h2 {
 
 .timer {
   position: sticky;
-  top: 0;
+  /* Below the iOS status bar once stuck, not under it (0 in a browser tab). */
+  top: env(safe-area-inset-top);
   z-index: 20;
   display: flex;
   align-items: center;
@@ -222,6 +233,31 @@ h2 {
   font-family: var(--fd); font-weight: 600; font-size: 11.5px;
   letter-spacing: .08em; text-transform: uppercase; color: var(--faint);
 }
+/* ─── Checklist sections (warm-ups, mobility) ──────────────── */
+
+.checklist {
+  margin-top: 12px; padding: 12px 16px 14px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.cl { margin: 0; padding: 0; list-style: none; }
+.cl li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.cl li:last-child { border-bottom: 0; }
+.cl-line { display: block; font-size: 15.5px; color: var(--ink); }
+.cl-line .ex-name { font-size: inherit; }
+.cl .cue { display: block; }
+.cl-done {
+  display: flex; align-items: center; gap: 10px;
+  min-height: var(--tap); margin-top: 6px;
+  font-family: var(--fd); font-weight: 700; font-size: 16px;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--dim);
+  cursor: pointer; user-select: none;
+}
+.cl-done input { accent-color: var(--accent); width: 22px; height: 22px; margin: 0; }
+.checklist.done .cl-done { color: var(--accent); }
+.checklist.done .cl { opacity: .55; }
+
 /* ─── Scored sections (#37) ───────────────────────────────── */
 
 /* The whiteboard: structure first, the one score last. */

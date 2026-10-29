@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   expandRounds, roundCount, schemeProblems, scoreShape, buildScore,
-  schemeLabel, scoreText, whiteboardLine
+  schemeLabel, scoreText, whiteboardLine, checklistLine
 } from '../src/scheme.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -159,6 +159,18 @@ test('a band reads as its level on the whiteboard', () => {
     sets: [{ reps: 15, loadType: 'band', band: 'light' }] }, units), '15 Band pull-apart · light band');
   assert.equal(whiteboardLine({ movement: 'Pull-up', kind: 'weight_reps',
     sets: [{ reps: 5, loadType: 'band-assist', band: 'medium' }] }, units), '5 Pull-up · medium assist band');
+});
+
+test('a checklist line counts identical sets', () => {
+  const units = { load: 'lb', distance: 'm' };
+  assert.equal(checklistLine({ movement: 'Row', kind: 'cardio', sets: [{ duration: '3:00', distance: null }] }, units), '3:00 Row');
+  assert.equal(checklistLine({ movement: 'Glute bridge', kind: 'reps',
+    sets: [{ reps: 15, loadType: 'bodyweight' }, { reps: 15, loadType: 'bodyweight' }] }, units), '2 × 15 Glute bridge');
+  assert.equal(checklistLine({ movement: 'Band pull-apart', kind: 'reps',
+    sets: [{ reps: 15, loadType: 'band', band: 'light' }, { reps: 15, loadType: 'band', band: 'light' }] }, units),
+    '2 × 15 Band pull-apart · light band');
+  assert.equal(checklistLine({ movement: 'Goblet squat', kind: 'weight_reps',
+    sets: [{ reps: 10, load: 25 }, { reps: 8, load: 35 }] }, units), '10-8 Goblet squat @ 25-35 lb');
 });
 
 test('scores read as a person would say them', () => {

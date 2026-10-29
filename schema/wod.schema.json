@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://wod.imav8n.com/schema/wod.schema.json",
-  "x-version": "1.4.0",
+  "x-version": "1.5.0",
   "$comment": "x-version matches the protocol version at the top of https://wod.imav8n.com/AGENT.md; its changelog says what changed.",
   "title": "WODin workout plan",
   "description": "A prescribed workout, written by an agent and rendered as a loggable page. Everything here is the plan; what the athlete actually did comes back in result.schema.json.",
@@ -96,6 +96,7 @@
       "type": "object",
       "required": ["name", "exercises"],
       "additionalProperties": false,
+      "not": { "required": ["checklist", "scheme"] },
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "type": "string", "description": "Shown as the section rule, e.g. \"Warm-up\"." },
@@ -104,6 +105,10 @@
           "default": "other"
         },
         "scheme": { "$ref": "#/$defs/scheme" },
+        "checklist": {
+          "type": "boolean",
+          "description": "Show the section as a list of movements to do, not record — warm-ups, mobility, cooldown. Each movement is one line (\"2 × 15 Glute bridge\") with its cue, and the section takes a single Done tick. Its sets are never logged; the result's `completed` lists the checklist sections the athlete ticked. Not with scheme."
+        },
         "exercises": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/exercise" } }
       }
     },

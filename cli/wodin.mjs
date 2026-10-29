@@ -326,6 +326,7 @@ function cmdValidate(files) {
       const where = `sections[${i}]`;
       if (!sec.name) problems.push(`${where}: missing name`);
       schemeProblems(sec).forEach(p => problems.push(`${where} (${sec.name}): ${p}`));
+      if (sec.checklist && sec.scheme) problems.push(`${where} (${sec.name}): a checklist section has no scheme — it is done, not scored`);
       (sec.exercises || []).forEach((ex, j) => {
         const exWhere = `${where}.exercises[${j}]`;
         if (!ex.movement) problems.push(`${exWhere}: missing movement`);
