@@ -514,6 +514,8 @@ def _summarise(result, submitted_at):
         # Scored sections (#37): the headline numbers, so an agent can read
         # benchmark history from the index without opening every session.
         "scores": result.get("scores") if isinstance(result.get("scores"), dict) else {},
+        # Checklist sections (warm-ups) the athlete ticked done.
+        "completed": result.get("completed") if isinstance(result.get("completed"), list) else [],
     }
 
 

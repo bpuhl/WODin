@@ -1,0 +1,108 @@
+{
+  "schema": "wodin/wod@1",
+  "workoutId": "2026-10-30",
+  "date": "2026-10-30",
+  "title": "Hinge + Pull",
+  "coach": "Gainz",
+  "coachNote": "Warm-up is a checklist: do it, tick it.",
+  "targetRpe": 7,
+  "units": {
+    "load": "lb",
+    "distance": "m"
+  },
+  "sink": {
+    "type": "post",
+    "url": "https://wod.imav8n.com/api/log"
+  },
+  "sections": [
+    {
+      "id": "warmup",
+      "name": "Warm-up",
+      "type": "warmup",
+      "checklist": true,
+      "exercises": [
+        {
+          "movement": "Row",
+          "kind": "cardio",
+          "tag": "Easy",
+          "cue": "Conversational (~2:30/500m). Raise core temp — not a workout.",
+          "sets": [
+            {
+              "duration": "3:00",
+              "distance": null
+            }
+          ]
+        },
+        {
+          "movement": "Banded ankle distraction",
+          "kind": "time",
+          "tag": "#1 limiter — daily",
+          "cue": "60 sec on the RIGHT ankle. Drive the knee over the toes, heel DOWN.",
+          "sets": [
+            {
+              "duration": "1:00"
+            }
+          ]
+        },
+        {
+          "movement": "Glute bridge",
+          "kind": "reps",
+          "tag": "Activation",
+          "cue": "Drive through the heels, squeeze at the top, ribs down.",
+          "sets": [
+            {
+              "reps": 15,
+              "loadType": "bodyweight"
+            },
+            {
+              "reps": 15,
+              "loadType": "bodyweight"
+            }
+          ]
+        },
+        {
+          "movement": "Band pull-apart",
+          "kind": "reps",
+          "tag": "Shoulder/scap prep",
+          "cue": "Pull to the chest, squeeze the shoulder blades.",
+          "sets": [
+            {
+              "reps": 15,
+              "loadType": "band",
+              "band": "light"
+            },
+            {
+              "reps": 15,
+              "loadType": "band",
+              "band": "light"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "strength",
+      "name": "Strength",
+      "type": "strength",
+      "exercises": [
+        {
+          "movement": "Dumbbell Romanian deadlift",
+          "kind": "weight_reps",
+          "cue": "Hips back, flat back.",
+          "sets": [
+            {
+              "reps": 10,
+              "load": 35,
+              "rest": "1:30"
+            },
+            {
+              "reps": 10,
+              "load": 35,
+              "rest": "1:30"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

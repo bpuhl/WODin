@@ -1,6 +1,6 @@
 # WODin — agent guide
 
-**Protocol version 1.4.0** · see the [changelog](#changelog) at the end.
+**Protocol version 1.5.0** · see the [changelog](#changelog) at the end.
 
 You are an agent that programs workouts for athletes at **https://wod.imav8n.com**. You write
 each athlete's workout into Object Storage; they log it on their phone; you read back what
@@ -147,6 +147,8 @@ How to read it:
    [Scored sections](#scored-sections-rounds-for-time-amrap-intervals). `_index.json` carries
    them too, so benchmark history is one read. An absent key means unanswered or skipped,
    never zero.
+10. **`completed` lists the checklist sections ticked Done** (warm-ups, mobility). Their
+    movements are never in `log`. See [Checklist sections](#checklist-sections-warm-ups-mobility-cooldown).
 
 ---
 
@@ -401,6 +403,33 @@ counting from 1), which shifts whenever you add a warm-up. The rules:
 The page's session clock keeps running across the whole workout. There is no per-section
 timer and none is planned: the gym clock does that job.
 
+### Checklist sections: warm-ups, mobility, cooldown
+
+When a section is to be done but not recorded, set `"checklist": true`. The page shows each
+movement as one line — "3:00 Row", "2 × 15 Glute bridge" — with its tag and cue, and the
+section gets a single **Done** tick. No fields, no RPE, no notes, no skip.
+
+```json
+{ "id": "warmup", "name": "Warm-up", "type": "warmup", "checklist": true,
+  "exercises": [
+    { "movement": "Row", "kind": "cardio", "tag": "Easy", "cue": "Conversational, ~2:30/500m.",
+      "sets": [{ "duration": "3:00" }] },
+    { "movement": "Glute bridge", "kind": "reps", "tag": "Activation", "cue": "Drive through the heels.",
+      "sets": [{ "reps": 15, "loadType": "bodyweight" }, { "reps": 15, "loadType": "bodyweight" }] }
+  ] }
+```
+
+Write the exercises exactly as you would anywhere else — `kind`, sets, canonical names — since
+the one-line summary is built from them. Identical sets read as a count ("2 × 15").
+
+What comes back: **nothing in `log`** for a checklist section's movements, ever — so their
+absence there means nothing. The record is `completed`, the ids of the checklist sections the
+athlete ticked (`"completed": ["warmup"]`, also in `_index.json`). A checklist section missing
+from it was not ticked. Give the section an `id` so that reads the same every day.
+
+`checklist` is opt-in per section; `type: "warmup"` alone still draws full logging rows. A
+checklist section has no `scheme`.
+
 ### Never invent an exercise to hold a number
 
 Do not add a pseudo-exercise such as "Total time" as a place to log a score. It pollutes the
@@ -496,6 +525,11 @@ The version moves with every change to either schema or to this guide. A minor v
 (1.**1**) is additive or a clarification; a major version changes the `schema` constants
 (`wodin/wod@2`) and may break existing plans.
 
+- **1.5.0** — 2026-10-29
+  - **Checklist sections**: `"checklist": true` on a section shows its movements as one-line
+    items with a single Done tick, for warm-ups, mobility and cooldown that don't need
+    recording. Their sets are never logged; the result's `completed` lists the sections
+    ticked. See [Checklist sections](#checklist-sections-warm-ups-mobility-cooldown).
 - **1.4.0** — 2026-10-01
   - **Bands** (#41): `loadType` `"band"` (resistance) and `"band-assist"` (assistance), each
     with `band`: `light` / `medium` / `hard`. Logged as the band actually used and compared

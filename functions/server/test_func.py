@@ -364,6 +364,10 @@ class TestResultCollection(unittest.TestCase):
         row = self.body(self.history())["sessions"][0]
         self.assertEqual(row["scores"], {"metcon": {"time": "9:08", "timeSec": 548}})
 
+    def test_completed_checklists_reach_the_index(self):
+        self.post(dict(self.RESULT, completed=["warmup"]))
+        self.assertEqual(self.body(self.history())["sessions"][0]["completed"], ["warmup"])
+
     def test_a_result_without_scores_indexes_as_empty(self):
         self.post(self.RESULT)
         self.assertEqual(self.body(self.history())["sessions"][0]["scores"], {})

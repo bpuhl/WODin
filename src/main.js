@@ -13,7 +13,7 @@ import { isAsPlanned, isBand } from './planned.js';
 import { hasSink, sheetActions } from './submit.js';
 import { neighbours, mostRecent } from './days.js';
 import { prescriptionNotes } from './rx.js';
-import { expandRounds, scoreShape, buildScore, schemeLabel, scoreText, whiteboardLine } from './scheme.js';
+import { expandRounds, checklistLine, scoreShape, buildScore, schemeLabel, scoreText, whiteboardLine } from './scheme.js';
 
 // Replaced by scripts/build.mjs with the same content hash the service worker
 // caches under. Shown in the library so "is this thing even updated?" is a
@@ -204,6 +204,8 @@ function forget(workoutId) {
 const unitOf = k => (WOD.units && WOD.units[k]) || (k === 'load' ? 'lb' : 'm');
 const isSkipped = id => S.skipped.includes(id);
 const eachExercise = () => (WOD.sections || []).flatMap(s => s.exercises || []);
+/* Exercises whose sets are logged — everything outside a checklist section. */
+const loggedExercises = () => (WOD.sections || []).filter(s => !s.checklist).flatMap(s => s.exercises || []);
 
 function seedState() {
   const sets = {};
@@ -220,7 +222,7 @@ function seedState() {
   return {
     elapsed: 0, running: false, startedAt: null,
     rpe: '', summary: '', duration: '',
-    skipped: [], sets, notes: {}, rpes: {}, added: {}, scores: {}
+    skipped: [], sets, notes: {}, rpes: {}, added: {}, scores: {}, done: {}
   };
 }
 
@@ -328,8 +330,9 @@ function renderWorkout() {
 
   const body = (WOD.sections || []).map(sec => `
     <div class="sec-head">${esc(sec.name)}</div>
-    ${sec.scheme ? renderScheme(sec) : ''}
-    ${(sec.exercises || []).map(ex => renderEx(ex, sec)).join('')}
+    ${sec.checklist ? renderChecklist(sec) : `
+      ${sec.scheme ? renderScheme(sec) : ''}
+      ${(sec.exercises || []).map(ex => renderEx(ex, sec)).join('')}`}
   `).join('');
 
   // Both closing controls carry their own label — the placeholder on one, the
@@ -399,6 +402,26 @@ function renderScheme(sec) {
     <ul class="wb">${(sec.exercises || [])
       .map(ex => `<li>${esc(whiteboardLine(ex, WOD.units))}</li>`).join('')}</ul>
     ${score}
+  </div>`;
+}
+
+/* A checklist section: movements to do, not to record (warm-ups,
+ * mobility). Each is one line — what and how much — with its cue, and the
+ * section takes a single Done tick. The tick is the record: the athlete
+ * says they did it, and nothing about it is typed in. */
+function renderChecklist(sec) {
+  const done = !!S.done[sec.id];
+  const items = (sec.exercises || []).map(ex => {
+    const name = esc(ex.movement);
+    const link = `<a class="ex-name" href="${esc(formLink(ex))}" target="_blank" rel="noopener">${name}${ICON.ext}</a>`;
+    const line = esc(checklistLine(ex, WOD.units)).replace(name, link);
+    const cue = (ex.tag || ex.cue)
+      ? `<span class="cue">${ex.tag ? `<span class="tag">${esc(ex.tag)}</span> · ` : ''}${esc(ex.cue || '')}</span>` : '';
+    return `<li><span class="cl-line">${line}</span>${cue}</li>`;
+  }).join('');
+  return `<div class="checklist ${done ? 'done' : ''}">
+    <ul class="cl">${items}</ul>
+    <label class="cl-done"><input type="checkbox" data-done="${esc(sec.id)}" ${done ? 'checked' : ''}>${done ? 'Done' : 'Mark done'}</label>
   </div>`;
 }
 
@@ -823,6 +846,14 @@ function bind() {
       return;
     }
 
+    const doneSec = e.target.dataset && e.target.dataset.done;
+    if (doneSec) {
+      if (e.target.checked) S.done[doneSec] = true;
+      else delete S.done[doneSec];
+      save(); renderWorkout();
+      return;
+    }
+
     const cap = e.target.dataset && e.target.dataset.capped;
     if (cap) {
       S.scores[cap] = { ...(S.scores[cap] || {}), capped: e.target.checked };
@@ -893,6 +924,10 @@ function buildDigest() {
 
   const width = 18;
   (WOD.sections || []).forEach(sec => {
+    if (sec.checklist) {
+      lines.push('', sec.name.toUpperCase() + (S.done[sec.id] ? '  ✓ done' : '  — not ticked'));
+      return;
+    }
     const rows = [];
     (sec.exercises || []).filter(ex => !isSkipped(ex.id)).forEach(ex => {
       const exRpe = S.rpes[ex.id];
@@ -907,7 +942,7 @@ function buildDigest() {
     if (score) lines.push('  Score: ' + score);
   });
 
-  const skipped = eachExercise().filter(ex => isSkipped(ex.id));
+  const skipped = loggedExercises().filter(ex => isSkipped(ex.id));
   if (skipped.length) lines.push('', 'SKIPPED  ' + skipped.map(e => e.movement).join(', '));
   if (S.summary.trim()) lines.push('', 'Summary: ' + S.summary.trim());
 
@@ -931,7 +966,10 @@ function buildResult() {
     if (score) scores[sec.id] = score;
   });
 
-  eachExercise().forEach(ex => {
+  // Checklist sections record only that they were done — never sets.
+  const completed = (WOD.sections || []).filter(s => s.checklist && S.done[s.id]).map(s => s.id);
+
+  loggedExercises().forEach(ex => {
     if (isSkipped(ex.id)) return;
     const note = (S.notes[ex.id] || '').trim();
     if (note) notes[ex.id] = note;
@@ -979,6 +1017,7 @@ function buildResult() {
     notes,
     exerciseRpe,
     scores,
+    completed,
     skipped: S.skipped.slice()
   };
 }
@@ -1441,6 +1480,9 @@ function historyDetail(r, back, plan) {
       </span></div>`;
   }).join('');
 
+  const completed = (r.completed || []).map(secId =>
+    `<p class="d">✓ ${esc(sections[secId] ? sections[secId].name : secId)} done</p>`).join('');
+
   const skipped = (r.skipped || []).map(id =>
     names[id] ? esc(names[id].movement) : esc(id)).join(', ');
 
@@ -1456,6 +1498,7 @@ function historyDetail(r, back, plan) {
     <p class="d">${esc(r.workoutId)}${head ? ' · ' + head : ''}</p>
     ${by}${stale}
     ${r.athleteSummary ? `<div class="lib-empty"><p style="margin:0">${esc(r.athleteSummary)}</p></div>` : ''}
+    ${completed}
     ${scores}
     ${blocks || `<div class="lib-empty"><p style="margin:0">Nothing logged.</p></div>`}
     ${skipped ? `<p class="d">Skipped: ${skipped}</p>` : ''}`;

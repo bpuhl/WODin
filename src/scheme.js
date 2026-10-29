@@ -154,6 +154,17 @@ export function schemeLabel(sec) {
   return `${n} round${n === 1 ? '' : 's'}${rest}`;
 }
 
+/* A checklist section's line for one movement (warm-ups, mobility):
+ * "3:00 Row", "2 × 15 Glute bridge". Identical sets collapse to a count;
+ * sets that differ read as the whiteboard joins them ("10-8-6"). */
+export function checklistLine(ex, units) {
+  const line = whiteboardLine(ex, units);
+  const sets = ex.sets || [];
+  const same = sets.length > 1 &&
+    sets.every(s => JSON.stringify({ ...s, id: 0 }) === JSON.stringify({ ...sets[0], id: 0 }));
+  return same ? `${sets.length} × ${line}` : line;
+}
+
 /* The score as a person reads it: "9:08", "5 + 12", "capped · 2 + 8". */
 export function scoreText(score) {
   if (!score) return '';
